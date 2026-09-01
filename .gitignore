@@ -1,0 +1,14 @@
+# environments & caches
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+
+# regenerable outputs — every run rebuilds these (139 MB and growing)
+runs/
+plots/
+
+# ── TTC DATA: NEVER COMMIT, even in a private repo ──────────────────────
+# Tire Test Consortium data is restricted to member teams by the TTC
+# agreement. Keep it on local disks only. (Also 368 MB / >100 MB files.)
+ttc/
