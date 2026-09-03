@@ -161,7 +161,7 @@ class TorqueSplitController:
           * torque request from APPS/BPS through the pedal map, gated by
             the FSAE EV.4.7 plausibility check.
         """
-        from model.config import cfg  # was: import car_data as cd
+        from model.config import cfg
 
         # pedal map + rules plausibility (EV.4.7): >25% APPS while braking
         # cuts motor power; restored only when APPS falls below 5%.

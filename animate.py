@@ -24,7 +24,7 @@ Reading the picture:
     directly as the paths separating.
 
 Nothing here is drawn to scale except the car: body, track, wheelbase and
-wheel size are the real numbers out of car_data.py.
+wheel size are the real numbers out of the params.yaml files.
 """
 
 import os

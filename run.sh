@@ -10,7 +10,7 @@
 # throttle) — Enter keeps each default. --defaults (or piping stdin) skips
 # the questions; the same knobs also exist as flags (run_sim.py --help).
 #
-# Step 1 runs verify.py (69 independent physics checks, ~35 s). If ANY check
+# Step 1 runs verify.py (78 independent physics checks, ~35 s). If ANY check
 # fails, the sim does NOT run — results from a sim that fails its own
 # physics audit aren't worth having. Step 2 records a labeled run under
 # runs/. Step 3 opens that run's plots (one Preview window), replay videos

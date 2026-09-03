@@ -24,7 +24,7 @@ the friction ELLIPSE:
 (Real combined-slip behavior is still subtler — full MF combined model
 belongs to the team's full-vehicle sim.)
 
-Coefficients: TTC Round 9 fit (R20 surrogates) — see car_data.py tires
+Coefficients: TTC Round 9 fit (R20 surrogates) — see tires/params.yaml
 block for provenance and the belt→asphalt scaling.
 """
 

@@ -643,7 +643,7 @@ def section_h():
 
 # ═══════════════════════ I. sensor stack (sensors.py)
 def section_i():
-    from model.config import cfg  # was: import car_data as cdd
+    from model.config import cfg
     from model.sensors import (SensorSuite, DriverAdapter, steer_map_deg,
                          steer_map_inv_deg)
     vp, tp_f, tp_r, cp = default_setup()

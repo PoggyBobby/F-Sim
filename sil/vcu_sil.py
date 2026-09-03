@@ -20,11 +20,12 @@ and reported (summary()) so the link is visibly alive.
 import os
 import subprocess
 
-from model.config import cfg  # was: import car_data as cd
+from model.config import cfg
 from controllers.python.torque_split import ControllerDebug
 
+# This module lives in sil/, next to the Makefile that builds the binary.
 SIL_EXE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                       "sil", "build", "vcu_sil")
+                       "build", "vcu_sil")
 SIL_NAME = "VCU (SIL)"
 MODE_NAMES = {0: "none", 1: "duty", 2: "current"}
 

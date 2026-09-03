@@ -367,7 +367,7 @@ def main():
 
     # sensor stack: the controller reads WSS/IMU/SAS/APPS/BPS at the VCU
     # rate — the default since 2026-08-31 (--perfect-state to bypass)
-    from model.config import cfg  # was: import car_data as cd
+    from model.config import cfg
     dt = 2.5e-4
     if args.perfect_state:
         sensors, ctrl_every = None, 1

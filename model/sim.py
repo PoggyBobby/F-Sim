@@ -41,7 +41,7 @@ def simulate(model: VehicleModel, controller, maneuver, dt=2.5e-4, log_every=4,
                     physics steps = the VCU rate, held (ZOH) in between.
     The PLANT inputs are identical in both modes — only what the controller
     KNOWS changes."""
-    from model.config import cfg  # was: import car_data as cd
+    from model.config import cfg
     p = model.p
     controller.reset()
     adapter = None
