@@ -1,4 +1,3 @@
-# ── environments & caches ───────────────────────────────────────────────
 .venv/
 venv/
 env/
@@ -10,18 +9,13 @@ __pycache__/
 .eggs/
 .DS_Store
 
-# ── regenerable outputs — every run rebuilds these (139 MB and growing) ─
 runs/
 plots/
 build/
 dist/
 
-# ── TTC DATA: NEVER COMMIT, even in a private repo ──────────────────────
-# Tire Test Consortium data is restricted to member teams by the TTC
-# agreement. Keep it on local disks only. (Also 368 MB / >100 MB files.)
 ttc/
 
-# ── C / VCU build artifacts (controller ports to C) ─────────────────────
 *.o
 *.obj
 *.a
@@ -30,10 +24,9 @@ ttc/
 *.bin
 *.hex
 controller_build/
-# software-in-the-loop host build of the VCU firmware (sil/Makefile)
+
 sil/build/
 
-# ── IDE / OS ────────────────────────────────────────────────────────────
 .vscode/
 *.swp
 *.swo
