@@ -27,6 +27,8 @@ from tire import MagicFormulaTire
 from vehicle import VehicleModel
 from controllers import make_configs
 from maneuvers import step_steer, corner_exit, slalom, pedal_check
+from tracks import track_maneuvers, model_for, CORNER_TYPES
+import tracks as _tracks
 from sim import run_matrix, print_table
 from style import RC, CONFIG_COLORS, REF_COLOR, config_lw, config_z
 from runlog import RunRecorder
@@ -267,6 +269,22 @@ def build_maneuvers(args, vp, interactive):
                            vx0=v["sl_v"], T_hold=v["sl_T"]))
     if want("pedal_check"):
         mans.append(pedal_check())
+
+    # track tests (tracks.py): --maneuver tracks; not part of "all" so the
+    # default run stays the four quick maneuvers
+    if args.maneuver == "tracks":
+        thr = (args.track_throttle if args.track_throttle is not None
+               else _tracks.DEFAULT_THROTTLE_PCT)
+        frac = (args.track_entry_frac if args.track_entry_frac is not None
+                else _tracks.DEFAULT_ENTRY_FRAC)
+        if interactive:
+            print("── track tests — Enter keeps the (default) ──────────────")
+            thr = _ask("apex throttle step", "% of peak", thr, 0, 100)
+            frac = _ask("entry speed fraction of √(µgR)", "-", frac, 0.3, 1.0)
+            print()
+        mans += track_maneuvers(vp, types=args.track, radius=args.track_radius,
+                                throttle_pct=thr, entry_frac=frac,
+                                direction=-1 if args.track_right else 1)
     return mans
 
 
@@ -274,6 +292,26 @@ def main():
     ap = argparse.ArgumentParser(description="SR s-diff / TV basic sim")
     ap.add_argument("--maneuver", default="all",
                     choices=["all", "step_steer", "corner_exit", "slalom",
+                             "pedal_check", "tracks"],
+                    help="'all' = the four scripted maneuvers; 'tracks' = "
+                         "the corner test matrix (tracks.py)")
+    tg = ap.add_argument_group("track tests (--maneuver tracks)")
+    tg.add_argument("--track", nargs="*", default=["all"],
+                    metavar="TYPE",
+                    help="corner types to run: " +
+                         " ".join(list(CORNER_TYPES) + ["split_mu", "all"]) +
+                         " (default all)")
+    tg.add_argument("--track-radius", type=float,
+                    help="run every selected type at this one radius [m] "
+                         "instead of its default radii")
+    tg.add_argument("--track-throttle", type=float,
+                    help="apex throttle step [%% of peak axle torque] "
+                         f"(default {_tracks.DEFAULT_THROTTLE_PCT:g})")
+    tg.add_argument("--track-entry-frac", type=float,
+                    help="entry speed as a fraction of √(µgR) "
+                         f"(default {_tracks.DEFAULT_ENTRY_FRAC:g})")
+    tg.add_argument("--track-right", action="store_true",
+                    help="right-hand corners instead of left-hand")
                              "pedal_check"])
     ap.add_argument("--perfect-state", action="store_true",
                     help="bypass the sensor stack: controller reads the "
@@ -356,6 +394,10 @@ def main():
     for man in maneuvers:
         t0 = time.time()
         controllers = make_configs(vp, tp_f, tp_r, cp)
+        # split-µ track tests run on a patched plant (tracks.model_for);
+        # every other maneuver gets the base model back unchanged
+        results = run_matrix(model_for(man, model), controllers, man, dt=dt,
+                             sensors=sensors, ctrl_every=ctrl_every)
         results = run_matrix(model, controllers, man, dt=dt, sensors=sensors,
                              ctrl_every=ctrl_every)
         print_table(man, results)

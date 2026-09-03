@@ -50,6 +50,10 @@ def simulate(model: VehicleModel, controller, maneuver, dt=2.5e-4, log_every=4,
         sensors.reset()
         adapter = DriverAdapter(p)
 
+    # closed-loop "driver replacement" (tracks.py): inputs from (t, state);
+    # scripted maneuvers keep their open-loop inputs(t)
+    driver = getattr(maneuver, "driver", None)
+
     n_steps = int(round(maneuver.duration / dt))
     s = [0.0] * NSTATES
     s[IVX] = maneuver.vx0
@@ -67,6 +71,8 @@ def simulate(model: VehicleModel, controller, maneuver, dt=2.5e-4, log_every=4,
     sr = None
     for k in range(n_steps):
         t = k * dt
+        delta, T_req = (driver(t, s) if driver is not None
+                        else maneuver.inputs(t))
         delta, T_req = maneuver.inputs(t)
         if k % ctrl_every == 0 or dbg is None:
             if sensors is None:

@@ -78,6 +78,12 @@ def front_steer_angles(p: VehicleParams, delta: float):
 
 class VehicleModel:
     def __init__(self, p: VehicleParams, tire_front: MagicFormulaTire,
+                 tire_rear: MagicFormulaTire, tires=None):
+        self.p = p
+        # per-wheel tires (FL, FR, RL, RR); `tires` overrides the default
+        # front/rear pairing — used for split-µ tests (tracks.py)
+        self.tires = (tuple(tires) if tires is not None
+                      else (tire_front, tire_front, tire_rear, tire_rear))
                  tire_rear: MagicFormulaTire):
         self.p = p
         self.tires = (tire_front, tire_front, tire_rear, tire_rear)
