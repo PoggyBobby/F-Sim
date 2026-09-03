@@ -1,0 +1,21 @@
+Firmware bug, patched for the host build only — fix it upstream and delete this file.
+
+CanManager_new() receives read_messageLimit[] / write_messageLimit[] but
+never stores them in the object, so me->read_messageLimit and
+me->write_messageLimit keep whatever malloc handed back. Both are used as
+the size of stack arrays (IO_CAN_DATA_FRAME canMessages[...]) in
+CanManager_read and canOutput_sendDebugMessage0, and as the FIFO read
+size. On the host the garbage size corrupts the stack on the first main
+loop cycle; on the target it depends on what is in RAM at boot.
+
+--- a/canManager.c
++++ b/canManager.c
+@@ -57,6 +57,8 @@
+     me->sendDelayus = defaultSendDelayus;
+ 
+     for (int i=0; i < 2; ++ i){
++        me->read_messageLimit[i] = read_messageLimit[i];
++        me->write_messageLimit[i] = write_messageLimit[i];
+         //Activate the CAN channels --------------------------------------------------
+         me->ioErr_Init[i] = IO_CAN_Init(IO_CAN_CHANNEL_0+i, busSpeed[i], 0, 0, 0);
+ 
