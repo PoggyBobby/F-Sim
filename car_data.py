@@ -393,6 +393,9 @@ VX_EST_TAU = 0.3                        # PLACEHOLDER — estimator tuning
 VX_EST_GATE_MPS = 1.0                   # PLACEHOLDER — estimator tuning
 VX_EST_GATE_TAU = 3.0                   # PLACEHOLDER — estimator tuning
 VX_EST_VY_TAU = 1.0                     # PLACEHOLDER — estimator tuning
+# What:  IMU accelerometer 1-sigma noise (ax, ay channels).
+# Unit:  m/s²
+IMU_ACCEL_NOISE_STD = 0.05              # PLACEHOLDER — IMU spec
 
 # What:  accelerator pedal position sensor (APPS) quantization. The pedal
 #        map is linear: APPS % → torque request, 100% = 2×T_wheel_max.

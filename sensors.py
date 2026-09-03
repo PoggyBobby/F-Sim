@@ -50,6 +50,11 @@ What the VCU must ESTIMATE (and the real one will too):
   dw_geo — the rear wheel-speed difference steering geometry explains,
       v·t·tan(δ)/(L·r_w): what an LSD-style law must subtract from the
       measured difference before acting (zero when the wheel is straight).
+  vx — there is no vehicle-speed sensor. Estimated from rear wheel speeds:
+      min(ωL,ωR)·r_w while driving (a spinning wheel reads too fast, so
+      take the slower one), max(...) while braking (a locking wheel reads
+      too slow). Both rears spinning together still fools it — that is a
+      REAL limitation the real car inherits, not a sim bug.
 """
 
 import math
@@ -116,6 +121,8 @@ class SensorReadings:
     kappa_est_RL: float = 0.0        # est. slip ratio per rear wheel [-]
     kappa_est_RR: float = 0.0
     dw_geo: float = 0.0              # Δω (RR−RL) steering geometry explains
+    vx_est: float = 0.0              # estimated ground speed [m/s]
+    steer_est: float = 0.0           # estimated road-wheel angle [rad]
 
 
 class DriverAdapter:
@@ -164,6 +171,7 @@ class SensorSuite:
         self._gyro_lpf = None
         self._vx_est = None
         self._vy_est = 0.0
+        self._gyro_lpf = None
 
     def measure(self, s, driver: DriverInputs, info, dt_vcu: float,
                 braking: bool) -> SensorReadings:
@@ -249,4 +257,16 @@ class SensorSuite:
         self._gyro_lpf = None
         self._vx_est = None
         self._vy_est = 0.0
+        r.ax = info["ax"] + n(cd.IMU_ACCEL_NOISE_STD)
+        r.ay = info["ay"] + n(cd.IMU_ACCEL_NOISE_STD)
+
+        # VCU estimates: road-wheel angle via the map; vx from wheel speeds
+        r.steer_est = math.radians(steer_map_deg(r.handwheel_deg))
+        wl, wr = r.wheel_speed_RL, r.wheel_speed_RR
+        w_pick = max(wl, wr) if braking else min(wl, wr)
+        r.vx_est = max(w_pick * vp.r_wheel, 0.0)
+        return r
+
+    def reset(self):
+        self._gyro_lpf = None
         self.rng = np.random.default_rng(cd.SENSOR_SEED)

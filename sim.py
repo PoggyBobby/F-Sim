@@ -64,6 +64,7 @@ def simulate(model: VehicleModel, controller, maneuver, dt=2.5e-4, log_every=4,
             # VCU-derived estimates (sensors.py): wheel-only speed, per-wheel
             # slip-ratio estimates, steering-explained Δω
             "vx_wheel", "kRL_est", "kRR_est", "dw_geo")}
+            "vx_est", "r_meas", "apps", "bps", "handwheel", "plaus_cut")}
 
     dbg = None
     last_info = {"ax": 0.0, "ay": 0.0}
@@ -118,6 +119,9 @@ def simulate(model: VehicleModel, controller, maneuver, dt=2.5e-4, log_every=4,
                 for nm in ("vx_est", "r_meas", "apps", "bps", "handwheel",
                            "plaus_cut", "vx_wheel", "kRL_est", "kRR_est",
                            "dw_geo"):
+            else:
+                for nm in ("vx_est", "r_meas", "apps", "bps", "handwheel",
+                           "plaus_cut"):
                     log[nm].append(0.0)
 
         s = rk4_step(model, s, delta, dbg.T_RL, dbg.T_RR, dt, k1=k1)
