@@ -23,17 +23,26 @@ Two layers live here:
       controller config sees identical noise (fair comparison).
 
 What the VCU must ESTIMATE (and the real one will too):
-  vx — there is no vehicle-speed sensor. Wheel-based, YAW-CORRECTED
-      estimate: each rear wheel is first referred to
+  vx — there is no vehicle-speed sensor. Two-stage estimate:
+      1. wheel-based, YAW-CORRECTED: each rear wheel is first referred to
          the CG with the gyro (v_from_RL = ω_RL·r_w + r·t/2, v_from_RR =
          ω_RR·r_w − r·t/2 — the inner wheel genuinely runs slower in a
          corner, and without this the pick below reads ~r·t/2 low in
          every turn), then min(...) while driving (a spinning wheel reads
          too fast, so take the slower one), max(...) while braking (a
-         locking wheel reads too slow) — `vx_wheel_est` (= `vx_est` here).
+         locking wheel reads too slow) — `vx_wheel_est`;
+      2. fused with the IMU (VX_EST_USE_IMU): a 2-state kinematic
+         predictor  v̇x = ax + r·vy,  v̇y = ay − r·vx  driven by the
+         accelerometers and the gyro (vy leaks to zero over VX_EST_VY_TAU
+         since nothing measures it), corrected toward the wheel-based
+         value with time constant VX_EST_TAU — unless the two disagree by
+         more than VX_EST_GATE_MPS, in which case the wheels are assumed
+         to be slipping TOGETHER (full-throttle corner exit) and the IMU
+         is trusted, leaking back over VX_EST_GATE_TAU so accelerometer
+         bias can never run away — `vx_est`.
       Measured on the corner-exit runs (before any spin): wheel-only
-      0.4–0.7 m/s rms error, yaw-corrected 0.14. Both rears spinning
-      together still fools it — the IMU fusion comes next.
+      0.4–0.7 m/s rms error, yaw-corrected 0.14, fused 0.07–0.10. Its
+      residual is what the real car's estimator (the EKF work) has to beat.
   per-wheel ground speed and slip ratio — each rear contact patch moves at
       vx ∓ r·track/2 (left wheel slower in a left turn). Combined with the
       wheel speed that gives a per-wheel slip-ratio ESTIMATE
@@ -99,7 +108,7 @@ class SensorReadings:
     # ---- VCU-derived (computed from the raw readings above) ----
     wheel_speed_RL: float = 0.0      # rad/s at the wheel (÷ gear ratio)
     wheel_speed_RR: float = 0.0
-    vx_est: float = 0.0              # estimated ground speed [m/s]
+    vx_est: float = 0.0              # estimated ground speed [m/s] (fused)
     vx_wheel_est: float = 0.0        # wheel-only ground speed estimate [m/s]
     steer_est: float = 0.0           # estimated road-wheel angle [rad]
     v_ground_RL: float = 0.0         # est. ground speed under each rear
@@ -153,6 +162,8 @@ class SensorSuite:
         self.gyro_bias = cd.IMU_GYRO_BIAS if noise else 0.0
         self.accel_bias = cd.IMU_ACCEL_BIAS if noise else 0.0
         self._gyro_lpf = None
+        self._vx_est = None
+        self._vy_est = 0.0
 
     def measure(self, s, driver: DriverInputs, info, dt_vcu: float,
                 braking: bool) -> SensorReadings:
@@ -190,14 +201,15 @@ class SensorSuite:
         # road-wheel angle via the steering map
         r.steer_est = math.radians(steer_map_deg(r.handwheel_deg))
 
-        # ground speed: yaw-corrected wheel pick
+        # ground speed: yaw-corrected wheel pick, then IMU fusion
         wl, wr = r.wheel_speed_RL, r.wheel_speed_RR
         half_t = 0.5 * vp.track_r
         v_from_L = wl * vp.r_wheel + r.yaw_rate * half_t   # y = +t/2
         v_from_R = wr * vp.r_wheel - r.yaw_rate * half_t   # y = −t/2
         v_pick = max(v_from_L, v_from_R) if braking else min(v_from_L, v_from_R)
         r.vx_wheel_est = max(v_pick, 0.0)
-        r.vx_est = r.vx_wheel_est
+        r.vx_est = self._estimate_vx(r.vx_wheel_est, r.ax, r.ay, r.yaw_rate,
+                                     dt_vcu)
 
         # per-wheel ground speed and slip ratio (left wheel at y = +t/2
         # moves at vx − r·t/2; the only place the turn enters)
@@ -212,6 +224,29 @@ class SensorSuite:
         r.dw_geo = expected_dw(r.vx_est, r.steer_est, vp)
         return r
 
+    def _estimate_vx(self, v_wheel: float, ax_meas: float, ay_meas: float,
+                     r_meas: float, dt: float) -> float:
+        """Ground-speed estimate. Wheel-only unless VX_EST_USE_IMU; then a
+        gated complementary filter on a 2-state kinematic predictor:
+            vx += (ax + r·vy)·dt,   vy += (ay − r·vx)·dt   (vy leaks to 0)
+        corrected toward the wheel-based value — slowly when the two
+        disagree by more than the gate (both rears slipping together),
+        quickly otherwise."""
+        if not cd.VX_EST_USE_IMU or self._vx_est is None:
+            self._vx_est, self._vy_est = v_wheel, 0.0
+            return v_wheel
+        vx, vy = self._vx_est, self._vy_est
+        v_pred = vx + (ax_meas + r_meas * vy) * dt
+        vy = (vy + (ay_meas - r_meas * vx) * dt) * math.exp(-dt / cd.VX_EST_VY_TAU)
+        gap = v_wheel - v_pred
+        tau = cd.VX_EST_TAU if abs(gap) < cd.VX_EST_GATE_MPS else cd.VX_EST_GATE_TAU
+        alpha = dt / (dt + tau)
+        self._vx_est = max(v_pred + alpha * gap, 0.0)
+        self._vy_est = vy
+        return self._vx_est
+
     def reset(self):
         self._gyro_lpf = None
+        self._vx_est = None
+        self._vy_est = 0.0
         self.rng = np.random.default_rng(cd.SENSOR_SEED)
