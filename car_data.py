@@ -368,9 +368,31 @@ IMU_GYRO_NOISE_STD = 0.3 * DEG          # PLACEHOLDER — IMU spec (deg/s 1σ)
 IMU_GYRO_BIAS = 0.1 * DEG               # PLACEHOLDER — uncalibrated bias
 IMU_LPF_HZ = 20.0                       # PLACEHOLDER — VCU filter choice
 
-# What:  IMU accelerometer 1-sigma noise (ax, ay channels).
+# What:  IMU accelerometer 1-sigma noise (ax, ay channels) and constant
+#        bias on the longitudinal channel (what the fused speed estimate
+#        below has to live with — it is why that filter leaks back to the
+#        wheel speeds instead of integrating forever).
 # Unit:  m/s²
 IMU_ACCEL_NOISE_STD = 0.05              # PLACEHOLDER — IMU spec
+IMU_ACCEL_BIAS = 0.03                   # PLACEHOLDER — uncalibrated bias
+
+# What:  VCU ground-speed ESTIMATOR (sensors.py) — there is no speed
+#        sensor. VX_EST_USE_IMU=False: wheel-only (slower rear driving,
+#        faster rear braking). True: complementary filter — integrate the
+#        accelerometers with the gyro (v̇x = ax + r·vy, v̇y = ay − r·vx; vy
+#        leaks to zero over VX_EST_VY_TAU since nothing measures it), pull
+#        vx toward the yaw-corrected wheel-based value with time constant
+#        VX_EST_TAU; if wheel and IMU disagree by more than VX_EST_GATE_MPS
+#        the wheels are taken to be slipping together and the pull slows
+#        to VX_EST_GATE_TAU (bias-bounded, never open-loop). Stand-in for
+#        the real car's EKF; tune against launch and full-throttle
+#        corner-exit logs once they exist.
+# Unit:  bool, s, m/s, s, s
+VX_EST_USE_IMU = True                   # PLACEHOLDER — estimator design choice
+VX_EST_TAU = 0.3                        # PLACEHOLDER — estimator tuning
+VX_EST_GATE_MPS = 1.0                   # PLACEHOLDER — estimator tuning
+VX_EST_GATE_TAU = 3.0                   # PLACEHOLDER — estimator tuning
+VX_EST_VY_TAU = 1.0                     # PLACEHOLDER — estimator tuning
 
 # What:  accelerator pedal position sensor (APPS) quantization. The pedal
 #        map is linear: APPS % → torque request, 100% = 2×T_wheel_max.
