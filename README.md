@@ -193,6 +193,37 @@ runs/
 - **The data is saved**, not just the pictures: `data/<maneuver>__<config>.csv`
   at 200 Hz by default (`--csv-hz`), every logged channel.
 
+## What "optimal" means, measured — `outputs.py`
+
+Every metrics table, `metrics.csv` and `summary.md` now also carries the
+plan's **Step 4** numbers, and each run gets a `REPORT.md` ranking the four
+modes on them (plus `ideal.csv`):
+
+| number | meaning | better |
+|---|---|---|
+| **exit ax [g]** | mean longitudinal accel in the 1.5 s after the throttle step (found from the data: first sample where the torque request has covered 90% of its rise) | higher — the mode put more power down |
+| **peak inner kappa [-]** | peak slip ratio of the *inner* rear from the throttle step on (inner = from the steer sign) | lower — past the tire peak ≈ 0.10 is wasted spin |
+| **yaw RMSE [rad/s]** | tracking error against the driver's yaw-rate reference | lower |
+| **inner regen [kJ]** | energy pulled *out* of the inner wheel (negative wheel power, integrated) | lower — a large number means the tune drags the inner wheel instead of capping it |
+
+Rank = per-column ranks summed; a run that spun is ranked last regardless.
+The console prints the ranking under every table.
+
+`REPORT.md` also holds the **ideal input/output sheet** for any test that
+carries corner geometry (`radius_m` in its recorded params): entry speed,
+ideal steer (kinematic and with the understeer gradient) and handwheel
+angle, yaw rate, per-wheel ground/wheel speeds and motor rpm, rear loads
+with lateral transfer, the tire's peak slip ratio at each load, the torque
+each rear can take before spinning, the resulting **throttle ceilings —
+open 50/50 (2× the unloaded inner wheel) vs an ideal split (both wheels)**,
+the throttle that just holds speed, and the entry-braking picture (limit
+decel, regen share the BPS map can command, mechanical remainder). All of
+it comes from `car_data.py` through the same containers the sim uses.
+
+```bash
+.venv/bin/python outputs.py runs/latest     # rebuild REPORT.md from a run's CSVs
+```
+
 ## Is the math right? — `verify.py`
 
 ```bash

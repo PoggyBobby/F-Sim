@@ -33,8 +33,10 @@ from sim import run_matrix, print_table
 from style import RC, CONFIG_COLORS, REF_COLOR, config_lw, config_z
 from runlog import RunRecorder
 
+from outputs import STEP4_EXTRA, write_report
+
 METRIC_COLS = ["yaw RMSE [rad/s]", "max |beta| [deg]", "dw RMSE [rad/s]",
-               "max |kappa| [-]", "max |ay| [g]"]
+               "max |kappa| [-]", "max |ay| [g]"] + STEP4_EXTRA
 
 
 def _plot_series(ax, results, xkey, ykey, transform=None):
@@ -391,6 +393,7 @@ def main():
     print(f"  run {rec.run_number:03d} '{rec.label}' -> {run_dir}\n")
 
     plots, replays, tables = [], [], {}
+    all_results = {}          # slug -> results, for the Step-4 report
     for man in maneuvers:
         t0 = time.time()
         controllers = make_configs(vp, tp_f, tp_r, cp)
@@ -404,6 +407,7 @@ def main():
         print(f"    ({time.time() - t0:.1f} s of compute)")
 
         rec.add_results(man, results)
+        all_results[man.slug] = results
         tables[man.slug] = summary_table(man, results)
         from animate import spin_threshold
         tag = f"run {rec.run_number:03d} · {rec.label}"
@@ -427,6 +431,9 @@ def main():
                       f"({time.time() - t0:.1f} s to render)")
 
     rec.finish(plots, replays, tables)
+    # plan Step 4: the four numbers, the mode ranking, and the ideal
+    # input/output sheet per corner (outputs.py) -> REPORT.md, ideal.csv
+    report = write_report(run_dir, maneuvers, all_results, vp, tp_f, tp_r)
 
     # what this run was, and how it differs from the one before it
     d, c = rec.param_diff, rec.code_diff
@@ -455,6 +462,7 @@ def main():
                                  else "unchanged (model source identical)"))
     print(f"  read:  {os.path.join(run_dir, 'summary.md')}"
           f"  |  {os.path.join(run_dir, 'CHANGES.md')}")
+    print(f"  Step-4 report (ranking + ideal sheet): {report}")
     if args.show:
         plt.show()
 

@@ -144,6 +144,11 @@ def metrics(log, p):
         "max |kappa| [-]": float(np.max(np.abs(np.stack([log["kRL"], log["kRR"]])))),
         "max |ay| [g]": float(np.max(np.abs(log["ay"])) / 9.81),
     }
+    # plan Step 4: exit accel, inner-wheel spin, inner regen (outputs.py);
+    # only the numbers — the metrics dict stays numeric for the CSVs
+    from outputs import step4_metrics, STEP4_EXTRA
+    s4 = step4_metrics(log)
+    out.update({k: s4[k] for k in STEP4_EXTRA})
     return out
 
 
@@ -162,16 +167,23 @@ def run_matrix(model, controllers, maneuver, dt=2.5e-4, sensors=None,
 
 
 def print_table(maneuver, results):
+    from outputs import STEP4_EXTRA, rank_configs
     cols = ["yaw RMSE [rad/s]", "max |beta| [deg]", "dw RMSE [rad/s]",
-            "max |kappa| [-]", "max |ay| [g]"]
+            "max |kappa| [-]", "max |ay| [g]"] + STEP4_EXTRA
     name_w = max(len(n) for n in results) + 2
     print(f"\n=== {maneuver.name}  ({maneuver.description}) ===")
-    header = "config".ljust(name_w) + "".join(c.rjust(19) for c in cols) + "  diverged?"
+    widths = [max(18, len(c) + 2) for c in cols]
+    header = ("config".ljust(name_w)
+              + "".join(c.rjust(w) for c, w in zip(cols, widths)) + "  diverged?")
     print(header)
     print("-" * len(header))
     for name, res in results.items():
         m = res["metrics"]
         row = name.ljust(name_w)
-        row += "".join(f"{m[c]:19.3f}" for c in cols)
+        row += "".join(f"{m[c]:{w}.3f}" for c, w in zip(cols, widths))
         row += "     no" if m["finished"] else "    YES (spun)"
         print(row)
+    # plan Step 4 ranking: exit ax ↑, peak inner κ ↓, yaw RMSE ↓, inner regen ↓
+    ranked = rank_configs(results)
+    print("    rank (Step 4): " + "  >  ".join(f"{n} [{s}]" for n, s, _ in ranked)
+          + "   (bracket = summed rank, lower is better; spun = last)")
