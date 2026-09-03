@@ -9,7 +9,11 @@
  * cycle when N is the cycle time, after N polls when the loop waits with
  * no cycle inside it (the ADC settle loop in initializations.c) — and the
  * main loop runs one iteration per cycle instead of spinning on wall-clock
- * time. */
+ * time.
+ *
+ * The task hooks and the CAN write path are wired to sil_link.c: a sensor
+ * frame is read from the simulator at the start of every cycle and the
+ * torque frame written at its end. */
 
 #include "IO_Driver.h"
 #include "IO_RTC.h"
@@ -20,6 +24,8 @@
 #include "IO_POWER.h"
 #include "IO_CAN.h"
 #include "IO_UART.h"
+
+#include "sil_link.h"
 
 #define SIL_CYCLE_US 10000UL   /* the firmware's main-loop period */
 #define SIL_POLL_US  1UL       /* time a busy-wait poll is taken to cost */
@@ -35,12 +41,14 @@ IO_ErrorType IO_Driver_Init(const IO_DRIVER_SAFETY_CONF *const safety_conf)
 
 IO_ErrorType IO_Driver_TaskBegin(void)
 {
+    sil_link_read();
     return IO_E_OK;
 }
 
 IO_ErrorType IO_Driver_TaskEnd(void)
 {
     rtc_now_us += SIL_CYCLE_US;
+    sil_link_write(rtc_now_us);
     return IO_E_OK;
 }
 
@@ -202,13 +210,17 @@ IO_ErrorType IO_CAN_ReadFIFO(ubyte1 handle, IO_CAN_DATA_FRAME *const buffer,
 IO_ErrorType IO_CAN_WriteFIFO(ubyte1 handle, const IO_CAN_DATA_FRAME *const data,
                               ubyte1 tx_length)
 {
-    (void)handle; (void)data; (void)tx_length;
+    ubyte1 i;
+    (void)handle;
+    for (i = 0; i < tx_length; i++)
+        sil_link_capture_can(&data[i]);
     return IO_E_OK;
 }
 
 IO_ErrorType IO_CAN_WriteMsg(ubyte1 handle, const IO_CAN_DATA_FRAME *const data)
 {
-    (void)handle; (void)data;
+    (void)handle;
+    sil_link_capture_can(data);
     return IO_E_OK;
 }
 
