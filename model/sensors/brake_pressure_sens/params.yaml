@@ -1,10 +1,13 @@
 namespace: sensors.brake_pressure_sens
+order: 92
+title: "SENSORS — BPS, brake pressure"
 
 about: >
   BPS — brake pressure sensor. Mechanical brakes are NOT modeled: in this sim
   brake pressure commands REGEN only.
 
 range_bar:
+  label:  "BPS full range"
   value:  100.0
   unit:   bar
   symbol: "-"
@@ -15,6 +18,7 @@ range_bar:
   why:    Sets the pressure that maps to full regen.
 
 quant_bar:
+  label:  "BPS quantization"
   value:  0.5
   unit:   bar/LSB
   symbol: "-"
@@ -25,6 +29,7 @@ quant_bar:
   why:    Regen command granularity.
 
 actuated_bar:
+  label:  "BPS actuated threshold"
   value:  3.0
   unit:   bar
   symbol: "-"
@@ -35,6 +40,7 @@ actuated_bar:
   why:    Defines "braking" for the EV.4.7 plausibility check.
 
 t_regen_max:
+  label:  "Max regen torque"
   value:  250.0
   unit:   N*m
   symbol: "-"

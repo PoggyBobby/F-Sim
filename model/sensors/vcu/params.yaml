@@ -1,10 +1,13 @@
 namespace: sensors.vcu
+order: 90
+title: "SENSORS & VCU — the VCU itself"
 
 about: >
   The VCU itself — loop rate, the rules plausibility thresholds, and the noise
   seed. Not a sensor, but the thing that reads all of them.
 
 rate_hz:
+  label:  "VCU loop rate"
   value:  100.0
   unit:   Hz
   symbol: "-"
@@ -19,6 +22,7 @@ rate_hz:
     before quoting controller performance.
 
 plaus_apps_cut:
+  label:  "Plausibility cut threshold"
   value:  25.0
   unit:   "%"
   symbol: "-"
@@ -29,6 +33,7 @@ plaus_apps_cut:
   why:    Implemented and unit-tested (verify I3); the pedal_check maneuver demonstrates it.
 
 plaus_apps_restore:
+  label:  "Plausibility restore threshold"
   value:  5.0
   unit:   "%"
   symbol: "-"
@@ -39,6 +44,7 @@ plaus_apps_restore:
   why:    The latch that makes the cut a latch and not a flicker.
 
 seed:
+  label:  "Sensor noise seed"
   value:  2026
   unit:   "-"
   symbol: "-"

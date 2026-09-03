@@ -1,4 +1,6 @@
 namespace: sensors.steering_angle
+order: 94
+title: "SENSORS — SAS, steering angle, and the steering map"
 
 about: >
   SAS — the steering-angle sensor sits at the HANDWHEEL. The VCU converts its
@@ -14,6 +16,7 @@ about: >
   FSAE lock. Implied steering ratio: ~3.2:1 near center, ~7.5:1 at lock.
 
 map_a0:
+  label:  "Steering map A0 (intercept)"
   value:  -0.0797
   unit:   "-"
   display_unit: deg (intercept)
@@ -25,6 +28,7 @@ map_a0:
   why:    Subtracted out to center the map; kept so the raw fit stays visible.
 
 map_a1:
+  label:  "Steering map A1 (linear)"
   value:  0.31
   unit:   "-"
   display_unit: deg/deg
@@ -36,6 +40,7 @@ map_a1:
   why:    How the VCU turns the SAS reading into a road-wheel angle.
 
 map_a2:
+  label:  "Steering map A2 (quadratic)"
   value:  -8.44e-4
   unit:   "-"
   display_unit: deg/deg^2
@@ -50,6 +55,7 @@ map_a2:
     — not a wheel-angle chart.
 
 quant_deg:
+  label:  "SAS quantization"
   value:  0.5
   unit:   deg/LSB
   symbol: "-"

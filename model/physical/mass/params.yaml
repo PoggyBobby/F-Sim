@@ -1,4 +1,6 @@
 namespace: mass
+order: 20
+title: "MASS"
 
 about: >
   READ THIS BEFORE ENTERING ANYTHING. The sim wants mass WITHOUT driver and
@@ -15,6 +17,7 @@ about: >
   comparable.
 
 car_no_driver:
+  label:  "Car mass, no driver"
   value:  400.1
   unit:   lb
   display_unit: kg (weighed as 400.1 lb)
@@ -33,6 +36,7 @@ car_no_driver:
   why:    With driver mass it sets EVERY inertial and grip force in the sim.
 
 driver:
+  label:  "Driver mass"
   value:  156.0
   unit:   lb
   display_unit: kg (entered as 156 lb)
@@ -48,6 +52,7 @@ driver:
     includes gear (~5-8 lb).
 
 total:
+  label:  "Total mass (computed)"
   derived: mass.car_no_driver + mass.driver
   unit:   kg
   symbol: m_total

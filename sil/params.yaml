@@ -1,10 +1,13 @@
 namespace: sil
+order: 110
+title: "SOFTWARE-IN-THE-LOOP (sil/)"
 
 about: >
   Software-in-the-loop: running the real SRE-VCU firmware binary as a fifth
   controller config. See sil/vcu_sil.py and the sil/ Makefile.
 
 boot_s:
+  label:  "SIL firmware boot time"
   value:  1.5
   unit:   s
   symbol: "-"

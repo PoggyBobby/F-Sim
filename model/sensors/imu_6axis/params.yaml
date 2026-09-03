@@ -1,10 +1,13 @@
 namespace: sensors.imu_6axis
+order: 95
+title: "SENSORS — IMU, yaw gyro and accelerometers"
 
 about: >
   IMU — yaw-rate gyro and the ax/ay accelerometer channels, plus the
   first-order low-pass the VCU applies to the gyro before feedback.
 
 gyro_noise_std:
+  label:  "IMU gyro noise (1σ)"
   value:  0.3
   unit:   deg/s
   display_unit: rad/s (entered as deg/s, 1 sigma)
@@ -16,6 +19,7 @@ gyro_noise_std:
   why:    Goes straight into the TV feedback — sets how clean the yaw control can be.
 
 gyro_bias:
+  label:  "IMU gyro bias"
   value:  0.1
   unit:   deg/s
   display_unit: rad/s (entered as deg/s)
@@ -27,6 +31,7 @@ gyro_bias:
   why:    Biases the yaw-rate error the TV controller integrates.
 
 lpf_hz:
+  label:  "VCU gyro low-pass"
   value:  20.0
   unit:   Hz
   symbol: f_c
@@ -37,6 +42,7 @@ lpf_hz:
   why:    "Trade: more filtering = less dither but more phase lag in the yaw loop."
 
 accel_noise_std:
+  label:  "IMU accel noise"
   value:  0.05
   unit:   m/s^2
   symbol: sigma_a

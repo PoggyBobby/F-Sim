@@ -1,10 +1,13 @@
 namespace: loads
+order: 70
+title: "LOAD TRANSFER"
 
 about: >
   Load transfer. The front/rear split is derived from the report's spring
   rates; the two rates are entered so the ratio is visible and refinable.
 
 spring_rate_front:
+  label:  "Front spring rate"
   value:  19.3
   unit:   "-"
   display_unit: N/mm (ratio only)
@@ -19,6 +22,7 @@ spring_rate_front:
     which is all that is used here.
 
 spring_rate_rear:
+  label:  "Rear spring rate"
   value:  24.8
   unit:   "-"
   display_unit: N/mm (ratio only)
@@ -30,6 +34,7 @@ spring_rate_rear:
   why:    Denominator half of the lateral load-transfer split.
 
 lat_transfer_frac_front:
+  label:  "Front lateral-transfer fraction"
   derived: loads.spring_rate_front / (loads.spring_rate_front + loads.spring_rate_rear)
   unit:   "-"
   display_unit: 0-1

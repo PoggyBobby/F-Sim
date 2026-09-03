@@ -192,6 +192,7 @@ class Config:
         self._root = Section("")
         self._meta = {}          # dotted path -> the full entry dict
         self._files = {}         # dotted namespace -> source file (repo-relative)
+        self._sections = {}      # dotted namespace -> {title, order, about, file}
 
     def __getattr__(self, name):
         if name.startswith("_"):
@@ -221,8 +222,21 @@ class Config:
         return dict(self._meta)
 
     def sections(self):
-        """Namespace -> source file, in load order (param_sheet walks this)."""
+        """Namespace -> source file, in load order."""
         return dict(self._files)
+
+    def section_list(self):
+        """Sections in presentation order: [(namespace, {title, order, about,
+        file}), ...]. param_sheet.py walks this to lay out the team sheet, so a
+        new params.yaml appears in the sheet by declaring `order:` and `title:`
+        — no edit to the generator."""
+        return sorted(self._sections.items(),
+                      key=lambda kv: (kv[1]["order"], kv[0]))
+
+    def section_params(self, namespace):
+        """The entries of one section, in the order they appear in its file."""
+        return {path: e for path, e in self._meta.items()
+                if e["namespace"] == namespace}
 
     def tag_of(self, dotted):
         """The provenance tag of a parameter, or 'UNTAGGED'."""
@@ -327,7 +341,12 @@ def load(root=ROOT):
             raise ConfigError(f"{rel}: namespace '{namespace}' already declared "
                               f"by {cfg._files[namespace]}")
         cfg._files[namespace] = rel
-        doc.pop("about", None)          # free-text file header, not a parameter
+        cfg._sections[namespace] = {
+            "title": doc.pop("title", namespace),
+            "order": doc.pop("order", 9999),
+            "about": (doc.pop("about", "") or "").strip(),
+            "file": rel,
+        }
 
         for key, entry in doc.items():
             dotted = f"{namespace}.{key}"

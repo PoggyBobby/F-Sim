@@ -12,7 +12,7 @@ Live checklist. Delete this file before the PR.
 - [x] **6. Split `sensors.py`** — readings / driver / suite + 5 per-sensor modules
 - [x] **7. Imports** — absolute package paths across the tree
 - [x] **8. `runlog.py`** — `cfg.meta()` instead of comment-scraping; repoint `CODE_FILES`
-- [ ] **9. `param_sheet.py`** — generate from YAML; output to `docs/datasheets/`
+- [x] **9. `param_sheet.py`** — generate from YAML; output to `docs/datasheets/`
 - [ ] **10. Readmes** — blanks per dir, maneuvers table, root README rewrite
 - [ ] **11. Verify** — value parity (76 constants), `verify.py` 78/78, full sim run
 - [ ] **12. Push + PR**

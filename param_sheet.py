@@ -1,45 +1,51 @@
 """Generate "FSAE-Sim Parameters.xlsx" — the team-facing parameter sheet.
 
 Three tabs:
-  1. Car parameters   — every number in car_data.py: what it is, its value
-                        (pulled LIVE from car_data.py so the sheet can never
-                        disagree with the sim), provenance, and how/why to
-                        measure it.
+  1. Car parameters   — GENERATED from the params.yaml files. Every column
+                        (label, symbol, what it is, value, units, provenance,
+                        what we measure, how, why it matters) is a field of
+                        the YAML entry, so the sheet cannot drift from the sim
+                        and adding a parameter never means editing this file.
   2. Sim signals      — the quantities the sim COMPUTES each step (slip
                         angle, slip ratio, loads, yaw rate, ...): what they
                         are, how the sim gets them, and which sensor sees
                         them on the real car.
   3. Test values      — the maneuver knobs and the real envelope numbers.
 
+Tabs 2 and 3 are editorial, not parameter data, so they stay hand-written
+below. Tab 1 used to be hand-written too — a 250-line table that duplicated
+every description already in car_data.py's comments and had to be kept in
+sync by hand. It is now four loops over cfg.
+
+Adding a parameter to the sheet: add it to the relevant params.yaml. Adding a
+whole SECTION: give the new params.yaml an `order:` and a `title:`.
+
 Color rule (team convention): values confirmed for the CURRENT CAR or
 DRIVER are GREEN; everything else (report car, guesses, rules, tuned gains)
 is black. When a value is later MEASURED it stays green.
 
-Rebuild after editing car_data.py:
-    .venv/bin/python param_sheet.py        # writes + reopens the file
+Rebuild after editing any params.yaml:
+    .venv/bin/python param_sheet.py
 
 Import to Google Sheets: drag the .xlsx into drive.google.com — formatting
 and colors carry over.
 """
 
-import math
+import os
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-from model.config import cfg  # was: import car_data as cd
+from model.config import cfg, GREEN_TAGS
 
-OUT = "FSAE-Sim Parameters.xlsx"
+OUT = os.path.join("docs", "datasheets", "FSAE-Sim Parameters.xlsx")
 
 GREEN = "FF1A7A1A"          # current-car / driver / measured values
 BLACK = "FF1A1A1A"
 HDR_FILL = PatternFill("solid", fgColor="FF223038")
 SEC_FILL = PatternFill("solid", fgColor="FFE8EAE4")
 WARN = "FF9A6A00"           # placeholder annotation text
-
-# tags that count as "for the current car / driver" → green
-GREEN_TAGS = {"CURRENT CAR", "MEASURED", "TTC FIT"}
 
 THIN = Side(style="thin", color="FFD9DBD4")
 BORDER = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
@@ -56,260 +62,18 @@ def fmt(v):
     return str(v)
 
 
-# ──────────────────────────────────────────────────────────────────────
-# Tab 1 — car parameters
-# columns: Parameter | Symbol | Code name | What it is / what it simulates |
-#          Value now | Units | Status (source) | What we measure |
-#          How we measure it | Why it matters
-# value=None means "pull getattr(cd, code_name)"
-# ──────────────────────────────────────────────────────────────────────
-P = []  # (section, rows)
+def field(entry, name, default="—"):
+    """One documentation field of a parameter, as a display string."""
+    v = entry.get(name)
+    if v is None or (isinstance(v, str) and not v.strip()):
+        return default
+    return " ".join(str(v).split())      # collapse YAML block-scalar wrapping
 
-P.append(("ENVIRONMENT", [
- ("Gravity", "g", "G", "Standard gravitational acceleration — sets every weight and load.",
-  None, "m/s²", "constant", "Nothing", "Physical constant", "Everything vertical scales from it."),
- ("Air density", "ρ", "RHO_AIR", "Density of the air the car drives through — sets downforce and drag.",
-  None, "kg/m³", "FROM REPORT", "Ambient conditions on event days (optional refinement)",
-  "Weather data / altitude correction", "Downforce and drag are ½ρ·(coeff·A)·v² — 5% density = 5% aero."),
-]))
 
-P.append(("MASS", [
- ("Car mass, no driver", "m_car", "CAR_MASS_NO_DRIVER",
-  "Complete ready-to-run vehicle, nobody in the seat.",
-  None, "kg (400.1 lb)", "MEASURED 2026-08-31 (corner scales)",
-  "Total car weight", "Corner scales (Intercomp SW500): 87.5/86.3/114.8/111.5 lb",
-  "With driver mass it sets EVERY inertial and grip force in the sim."),
- ("Driver mass", "m_driver", "DRIVER_MASS",
-  "Driver in full gear (suit, helmet, shoes). Convention: use the HEAVIEST regular driver.",
-  None, "kg (entered 156 lb)", "CURRENT CAR (team)",
-  "Suited driver weight", "Bathroom scale, fully suited",
-  "The car never runs without one. Confirm 156 lb is heaviest + includes gear (~5–8 lb)."),
-]))
-
-P.append(("GEOMETRY & CG", [
- ("Wheelbase", "L", "WHEELBASE", "Front-axle to rear-axle distance.",
-  None, "m", "FROM REPORT (2023 car)", "Axle-center to axle-center distance",
-  "Tape measure / CAD", "Sets yaw geometry, the bicycle-model reference, and CG position math."),
- ("Front track", "t_f", "TRACK_FRONT", "Distance between the two FRONT contact-patch centers.",
-  None, "m", "FROM REPORT", "Center-of-tire to center-of-tire, front",
-  "Tape measure / CAD", "Lever arm for front lateral load transfer."),
- ("Rear track", "t_r", "TRACK_REAR", "Same, rear axle.",
-  None, "m", "FROM REPORT", "Center-of-tire to center-of-tire, rear",
-  "Tape measure / CAD", "THE torque-vectoring lever arm: Mz = (t_r/2)·ΔFx. Bigger track = more yaw per N·m of split."),
- ("Front weight fraction", "%front", "WEIGHT_FRACTION_FRONT",
-  "Share of total weight on the front axle, driver seated.",
-  None, "0–1", "MEASURED 2026-08-31 (scales, NO driver)",
-  "Front axle share WITH DRIVER SEATED (expect ~1–2% lower than the 43.44% car-only)",
-  "Repeat the corner-scale session with the driver in the seat",
-  "Decides how much grip each axle owns — understeer/oversteer balance starts here."),
- ("CG height", "h", "H_CG", "Height of the center of gravity above ground.",
-  None, "m", "FROM REPORT", "CG height",
-  "Tilt test (weigh one axle while lifting the other) or CAD",
-  "Drives ALL load transfer — every grip shift in braking, accel, and cornering is proportional to h."),
- ("Yaw inertia", "I_z", "I_Z", "Resistance of the whole car to changing its yaw (spin) rate.",
-  None, "kg·m²", "FROM REPORT", "Yaw moment of inertia",
-  "CAD mass model (practical) or trifilar pendulum test",
-  "Sets how fast the car responds to the TV yaw moment — directly in Iz·ṙ = ΣMz."),
-]))
-
-P.append(("WHEELS & DRIVETRAIN", [
- ("Tire radius (loaded)", "r_w", "WHEEL_RADIUS", "Ground-to-axle-center distance with the car's weight on the tire.",
-  None, "m (18\" OD / 2)", "CURRENT CAR",
-  "Axle-center height, car on the ground", "Ruler to the axle center",
-  "Converts wheel torque to drive force (F = T/r) and wheel speed to ground speed. Loaded is a few mm less than free."),
- ("Upright planetary ratio", "gr", "GEAR_RATIO",
-  "Reduction of the planetary gear stage in each upright, motor shaft → wheel.",
-  None, "—", "FROM REPORT ⚠ confirm with powertrain",
-  "The planetary's reduction ratio", "Ask powertrain / count gear teeth in CAD",
-  "Wheel torque = motor torque × gr; reflected rotor inertia = rotor J × gr². The 21 N·m motor is useless without it."),
- ("Motor peak torque", "T_pk", "MOTOR_TORQUE_PEAK", "Peak torque of ONE motor at its shaft.",
-  None, "N·m", "CURRENT CAR (AMK kit datasheet)",
-  "Nothing (datasheet value)", "AMK kit manual §6.5.3; dyno confirms someday",
-  "×13 gear = 273 N·m per wheel — the ceiling every torque command lives under."),
- ("Pack voltage", "V_DC", "PACK_VOLTAGE", "Accumulator nominal voltage.",
-  None, "V", "CURRENT CAR (design decision)",
-  "Nothing (design value)", "Accumulator design",
-  "Sets motor peak power. 4 motors × ~20 kW @ 380 V = 80 kW = the rules cap exactly — sized for the 4WD end state."),
- ("Motor peak power", "P_pk", "MOTOR_POWER_PEAK", "Peak mechanical power of ONE motor at OUR pack voltage.",
-  None, "W", "DERIVED (kit curves scaled to 380 V)",
-  "Actual peak power at 380 V", "Read the 380 V curve in the AMK manual; dyno pull once the pack exists",
-  "Caps torque above ~17 m/s (37 mph): at 40 mph only 256 of 273 N·m is available. 2-rear build tops out ~40 kW."),
- ("Motor max speed", "n_max", "MOTOR_MAX_SPEED", "Maximum motor shaft speed.",
-  None, "rad/s (20,000 rpm)", "CURRENT CAR (AMK kit datasheet)",
-  "Nothing (datasheet value)", "AMK kit manual",
-  "= ~36 m/s (80 mph) ground speed at 13:1 — comfortably above the 40 mph envelope, not the limiter."),
- ("Wheel spin inertia", "I_w", "I_WHEEL",
-  "Spin inertia of one rear corner: tire + rim + hub + brake rotor + motor rotor × gr².",
-  None, "kg·m²", "DERIVED estimate ⚠ replace with CAD",
-  "Rotating inertia of one corner", "CAD mass properties + rotor J from the exact AMK motor sheet",
-  "Sets how fast an unloaded wheel spins up — the s-diff's whole problem. Controller gains are sensitive to it: retune when it changes."),
- ("Total power cap", "P_max", "POWER_CAP_TOTAL", "FSAE EV rules limit on total drive power (EV.4.2).",
-  None, "W", "RULES VALUE",
-  "Nothing (rulebook)", "Confirm in the current-year rulebook",
-  "Hard ceiling. Sim applies it to mechanical power (no drivetrain losses modeled) — real car hits it ~10–15% earlier."),
- ("Regen speed cutoff", "—", "REGEN_SPEED_CUTOFF", "Below this speed no negative (regen) torque is commanded.",
-  None, "m/s (≈5 km/h)", "RULES VALUE",
-  "Nothing (rulebook)", "Confirm in the current-year rulebook",
-  "Rules restrict regen near standstill; also keeps the sim's low-speed slip math out of its untrustworthy zone."),
-]))
-
-P.append(("AERO", [
- ("Lift coefficient", "C_L", "CL_COEFF", "Downforce coefficient, referenced to the frontal area.",
-  None, "—", "FROM REPORT (old car's aero)",
-  "Current car's downforce coefficient", "CFD, then straight-line coast-down / load-cell validation",
-  "Downforce = ½ρ·C_L·A·v² — free grip that grows with speed²."),
- ("Drag coefficient", "C_D", "CD_COEFF", "Aerodynamic drag coefficient, same reference area.",
-  None, "—", "FROM REPORT (old car's aero)",
-  "Current car's drag coefficient", "CFD + coast-down test",
-  "Sets top-speed force budget and the torque needed to hold speed in every maneuver."),
- ("Frontal area", "A_F", "FRONTAL_AREA", "Aerodynamic reference area.",
-  None, "m²", "FROM REPORT",
-  "Projected frontal area", "CAD projection",
-  "Only the products C·A enter the physics — keep coefficient and area consistent with each other."),
- ("ClA (computed)", "C_L·A", "CLA", "The downforce product the sim actually uses.",
-  None, "m²", "DERIVED", "—", "= C_L × A_F, never edited directly", "—"),
- ("CdA (computed)", "C_D·A", "CDA", "The drag product the sim actually uses.",
-  None, "m²", "DERIVED", "—", "= C_D × A_F, never edited directly", "—"),
- ("Aero balance", "%aero_f", "AERO_BALANCE_FRONT", "Fraction of total downforce landing on the FRONT axle.",
-  None, "0–1", "PLACEHOLDER ⚠ pure guess",
-  "Center-of-pressure position", "CFD (aero team) — ask for CP height too",
-  "Moves grip between axles as speed rises — shapes high-speed balance directly. One of the last pure guesses outside tires."),
-]))
-
-P.append(("STEERING GEOMETRY", [
- ("Ackermann fraction", "%A", "ACKERMANN_FRACTION",
-  "How much of the geometric inner/outer steer split the linkage delivers (0 = parallel, 1 = full Ackermann).",
-  None, "—", "PLACEHOLDER (parallel) ⚠ RWheel curve needed",
-  "The steering curve: both wheels' angles vs handwheel angle",
-  "From the steering chart: LWheel curve is on file, need the RWheel polynomial from the same chart",
-  "±4°/wheel at the 23° full lock; proven to flip whether s-diff-only survives the hairpin (runs 007 vs 008)."),
-]))
-
-P.append(("SENSORS & VCU — what the controller is allowed to know (sensors.py)", [
- ("VCU loop rate", "—", "VCU_RATE_HZ", "How often sensors are sampled and torque is recomputed (physics runs at 4 kHz regardless).",
-  None, "Hz", "PLACEHOLDER ⚠ ask software team", "The real VCU loop rate", "Software team",
-  "Gains proven stable at 100 Hz; make it match reality before quoting controller performance."),
- ("Steering map A0/A1/A2", "y=A0+A1x+A2x²", "STEER_MAP_A0/A1/A2",
-  "Handwheel angle → road-wheel angle, the team chart's LWheel curve (centered, odd-extended).",
-  "−0.0797 / 0.31 / −8.44E-04", "deg→deg", "CURRENT CAR (team chart)",
-  "The steering curve incl. RWheel", "Steering chart / kinematics sweep",
-  "How the VCU turns the SAS reading into a road-wheel angle. Full lock 23° ≈ 103° handwheel."),
- ("SAS quantization", "—", "SAS_QUANT_DEG", "Steering-angle sensor resolution at the handwheel.",
-  None, "deg/LSB", "PLACEHOLDER", "Sensor spec", "Datasheet of the chosen SAS", "Steering resolution the VCU actually sees."),
- ("WSS quantization", "—", "WSS_QUANT_RPM", "Motor-speed resolution over CAN (WSS = motor resolver ÷ planetary ratio).",
-  None, "rpm/LSB", "PLACEHOLDER", "AMK CAN speed resolution", "AMK CAN spec",
-  "1 motor rpm ≈ 1.8 mm/s ground speed — effectively noise-free wheel speed."),
- ("IMU gyro noise / bias", "σ, b", "IMU_GYRO_NOISE_STD / _BIAS", "Yaw-gyro 1σ noise and constant bias.",
-  "0.3 / 0.1 °/s", "rad/s", "PLACEHOLDER", "IMU datasheet numbers", "Chosen IMU's spec sheet",
-  "Goes straight into the TV feedback — sets how clean the yaw control can be."),
- ("IMU accel noise", "σ", "IMU_ACCEL_NOISE_STD", "Accelerometer 1σ noise (ax, ay).",
-  None, "m/s²", "PLACEHOLDER", "IMU datasheet", "Spec sheet", "Feeds future estimation (vx observer, validation logging)."),
- ("VCU gyro low-pass", "f_c", "IMU_LPF_HZ", "First-order filter the VCU applies to the gyro before feedback.",
-  None, "Hz", "PLACEHOLDER", "—", "Software choice; tune against noise",
-  "Trade: more filtering = less dither but more phase lag in the yaw loop."),
- ("APPS quantization", "—", "APPS_QUANT_PCT", "Accelerator pedal position resolution. Pedal map: 100% = full axle torque.",
-  None, "%/LSB", "PLACEHOLDER", "APPS sensor spec", "Datasheet", "Torque request granularity."),
- ("BPS range / quant / actuated", "—", "BPS_RANGE_BAR / _QUANT_BAR / _ACTUATED_BAR",
-  "Brake pressure sensor range, resolution, and the pressure that counts as 'braking' for the rules check.",
-  "100 / 0.5 / 3 bar", "bar", "PLACEHOLDER", "BPS spec + brake system pressures",
-  "Brake team: line pressure at threshold/full braking", "Defines braking for regen mapping and EV.4.7."),
- ("Max regen torque", "—", "T_REGEN_MAX", "Total rear-axle regen torque at full brake pressure (mechanical brakes NOT modeled).",
-  None, "N·m", "PLACEHOLDER ⚠ battery charge limit sets this", "Allowed charge current → torque",
-  "Accumulator team: max charge C-rate", "Caps how much 'braking' the sim's BPS can command."),
- ("Plausibility thresholds", "—", "PLAUS_APPS_CUT / _RESTORE", "FSAE EV.4.7: >25% APPS while braking cuts power until APPS <5%.",
-  "25 / 5", "%", "RULES VALUE", "—", "Rulebook (confirm current year)",
-  "Implemented and unit-tested (verify I3); pedal_check maneuver demonstrates it."),
- ("Sensor noise seed", "—", "SENSOR_SEED", "Seed for the noise generator — runs repeatable, all configs see identical noise.",
-  None, "—", "NUMERICAL GUARD", "—", "—", "Fair comparisons and reproducible runs."),
-]))
-
-P.append(("LOAD TRANSFER", [
- ("Front lateral-transfer fraction", "—", "LAT_TRANSFER_FRAC_FRONT",
-  "Share of total lateral load transfer reacted by the FRONT axle (roll-stiffness split).",
-  None, "0–1", "FROM REPORT (spring-rate ratio only) ⚠ crude",
-  "Front vs rear roll stiffness", "Suspension team: roll rates incl. ARBs, motion ratios, roll-center heights",
-  "Which axle eats the load transfer = which axle loses grip first — trades understeer/oversteer at the limit."),
-]))
-
-P.append(("TIRES — TTC ROUND 9 FIT (R20 compound, 2026-08-31) — surrogate sizes; road µ = belt × 0.67 pending skidpad", [
- ("Belt→road grip scale", "—", "TIRE_MU_ROAD_SCALE",
-  "Calspan's belt grips harder than asphalt; peak µ scaled by this for road prediction.",
-  None, "—", "PLACEHOLDER ⚠ skidpad measures this", "Steady-state skidpad lateral g",
-  "Skidpad test vs sim prediction", "Multiplies EVERY grip number — the single biggest absolute-accuracy lever left."),
- ("Peak longitudinal friction", "µ₀x", "TIRE_MU0_LONG",
-  "Drive/brake grip peak — fitted 9% below lateral; combined slip caps on the friction ELLIPSE.",
-  None, "—", "TTC FIT R9", "—", "tire_fit.py on Round 9 drive/brake runs",
-  "Sets wheelspin threshold and traction capability."),
- ("Peak friction coefficient", "µ₀", "TIRE_MU0", "Peak grip per newton of load, at the nominal load.",
-  None, "—", "TTC FIT R9",
-  "Peak µ at several loads", "TTC data fit (if access ever appears) or skidpad testing",
-  "THE grip number. Max lateral g, spin thresholds, everything — the single most important number in the sim."),
- ("Load sensitivity", "s_µ", "TIRE_S_MU", "How fast the grip COEFFICIENT falls as load rises.",
-  None, "—/100% load", "TTC FIT R9",
-  "µ at low vs high load", "Same TTC fit",
-  "The reason load transfer costs grip and torque placement matters at all. Zero would make TV pointless."),
- ("Nominal tire load", "Fz_nom", "TIRE_FZ_NOM", "The load at which µ₀ is defined (≈ one static corner weight).",
-  None, "N", "DERIVED (follows the masses automatically)",
-  "—", "= (m_car + m_driver)·g / 4", "Reference point for the load-sensitivity line."),
- ("Front cornering stiffness", "c_α,f", "TIRE_C_ALPHA_FRONT",
-  "Lateral force per radian of slip angle, per newton of load (front tire).",
-  None, "1/rad", "TTC FIT R9",
-  "Slope of Fy vs slip angle at small angles", "TTC cornering sweep",
-  "Front-axle responsiveness; with rear stiffness sets the understeer gradient K_us the TV reference uses."),
- ("Rear cornering stiffness", "c_α,r", "TIRE_C_ALPHA_REAR", "Same, rear tire.",
-  None, "1/rad", "TTC FIT R9", "Same, rear", "TTC cornering sweep",
-  "Rear grip slope — stability side of the understeer gradient."),
- ("Longitudinal slip stiffness", "c_κ", "TIRE_C_KAPPA",
-  "Drive/brake force per unit slip ratio, per newton of load.",
-  None, "1/unit slip", "TTC FIT R9",
-  "Slope of Fx vs slip ratio", "TTC drive/brake sweep",
-  "Sets wheel-spin dynamics speed — the s-diff's plant. Gains retune if it moves."),
- ("Lateral shape factor", "C_y", "TIRE_SHAPE_C_LAT", "Magic Formula: how sharply lateral force peaks.",
-  None, "—", "TTC FIT R9", "Curve shape near/past the peak", "TTC fit",
-  "With E_y, sets where the curve peaks (currently 11.6° — real slicks ~6–10°) and how it lets go."),
- ("Lateral curvature factor", "E_y", "TIRE_CURV_E_LAT", "Magic Formula: fall-off past the lateral peak.",
-  None, "—", "TTC FIT R9", "Post-peak behavior", "TTC fit",
-  "Gentle vs snappy breakaway — currently more forgiving than a real slick."),
- ("Longitudinal shape factor", "C_x", "TIRE_SHAPE_C_LONG", "Same idea, drive/brake direction.",
-  None, "—", "TTC FIT R9", "Curve shape", "TTC fit",
-  "Sets the peak slip ratio (~0.10) — also the replay's red-wheel spin threshold."),
- ("Longitudinal curvature factor", "E_x", "TIRE_CURV_E_LONG", "Fall-off past the longitudinal peak.",
-  None, "—", "TTC FIT R9", "Post-peak behavior", "TTC fit",
-  "How violently a spinning wheel loses force — feeds the wheelspin runaway."),
-]))
-
-P.append(("CONTROLLER GAINS — tuned in-sim; retune whenever vehicle/tire numbers move", [
- ("s-diff proportional gain", "Kp", "KP_SDIFF", "Torque per rad/s of wheel-speed-difference error.",
-  None, "N·m/(rad/s)", "TUNED (sim)", "—", "Re-tune in sim: oscillation = too hot, sluggish = too cold",
-  "How hard the s-diff fights wheel-speed error."),
- ("s-diff integral gain", "Ki", "KI_SDIFF", "Torque per accumulated rad of error.",
-  None, "N·m/rad", "TUNED (sim)", "—", "Same", "Removes steady error (e.g. constant-radius corners)."),
- ("s-diff integral clamp", "—", "I_SDIFF_MAX", "Anti-windup limit on the integral term.",
-  None, "N·m", "TUNED (sim)", "—", "Same", "Stops the integral charging up during saturation and overshooting after."),
- ("s-diff torque-split clamp", "ΔT_max", "DT_SDIFF_MAX",
-  "Hard cap on how much torque the s-diff may move between wheels.",
-  None, "N·m", "TUNED (sim) — SAFETY-CRITICAL",
-  "—", "Sized in sim against the spin scenario",
-  "Without it the s-diff dumps torque onto the loaded outer tire near the limit and power-oversteers the car. Proven in sim."),
- ("TV proportional gain", "Kp", "KP_TV", "Yaw moment per rad/s of yaw-rate error.",
-  None, "N·m/(rad/s)", "TUNED (sim)", "—", "Re-tune in sim", "How hard TV chases the yaw reference."),
- ("TV integral gain", "Ki", "KI_TV", "Yaw moment per accumulated rad of error.",
-  None, "N·m/rad", "TUNED (sim)", "—", "Same", "Steady-state yaw accuracy in long corners."),
- ("TV integral clamp", "—", "I_TV_MAX", "Anti-windup limit on the TV integral.",
-  None, "N·m", "TUNED (sim)", "—", "Same", "Bounds windup when the reference is unreachable (e.g. full lock at speed)."),
- ("Yaw-moment clamp", "Mz_max", "MZ_MAX", "Cap on total commanded yaw moment.",
-  None, "N·m", "TUNED (sim)", "—", "Same", "Keeps TV authority bounded."),
- ("Reference aggressiveness", "—", "AY_FRAC",
-  "The yaw-rate reference is capped at this fraction of friction-limited lateral accel.",
-  None, "0–1", "TUNED (sim)", "—", "Same",
-  "0.95 = ask for 95% of what grip allows — margin against an optimistic reference."),
-]))
-
-P.append(("NUMERICAL", [
- ("Low-speed guard", "v_ε", "V_EPS", "Minimum speed used in slip-angle/slip-ratio denominators.",
-  None, "m/s", "NUMERICAL GUARD", "—", "—",
-  "Below ~0.5 m/s wheel-slip math is untrustworthy — launches are out of scope until reworked."),
-]))
+def units_of(entry):
+    """What to show in the Units column: the human form when the entry gives
+    one (`kg (weighed as 400.1 lb)`), otherwise the machine unit."""
+    return field(entry, "display_unit", default=field(entry, "unit"))
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -464,36 +228,50 @@ def add_sheet(wb, title, headers, widths):
 wb = Workbook()
 wb.remove(wb.active)
 
-# ---- tab 1
+# ---- tab 1 — generated from the params.yaml files
 H1 = ["Parameter", "Symbol", "Name in the code", "What it is / what it simulates",
       "Value now", "Units", "Status (where the number comes from)",
       "What we measure", "How we measure it", "Why it matters"]
-W1 = [26, 9, 26, 46, 13, 16, 34, 30, 38, 48]
+W1 = [26, 9, 30, 46, 13, 16, 34, 30, 38, 48]
 ws = add_sheet(wb, "Car parameters", H1, W1)
 
 r = 2
-for section, rows in P:
-    ws.cell(row=r, column=1, value=section)
+for namespace, sec in cfg.section_list():
+    ws.cell(row=r, column=1, value=sec["title"])
     ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=len(H1))
     c = ws.cell(row=r, column=1)
     c.font = Font(bold=True, size=10.5, color=BLACK)
     c.fill = SEC_FILL
     r += 1
-    for (name, sym, code, what, val, units, status, meas, how, why) in rows:
-        if val is None:
-            val = fmt(getattr(cd, code))
-        green = any(t in status for t in GREEN_TAGS)
-        vals = [name, sym, code, what, val, units, status, meas, how, why]
+
+    for path, e in cfg.section_params(namespace).items():
+        status = field(e, "status", default="—")
+        tag = cfg.tag_of(path)
+        green = tag in GREEN_TAGS
+        # A derived value shows its formula where an entered value would show
+        # its source, so the sheet says how it is computed, not just what it is.
+        how = (f"= {field(e, 'derived')}" if "derived" in e
+               else field(e, "how"))
+        vals = [field(e, "label", default=e["name"]),
+                field(e, "symbol", default="—"),
+                path,
+                field(e, "what"),
+                fmt(e["si"]),
+                units_of(e),
+                status,
+                field(e, "need"),
+                how,
+                field(e, "why")]
         for ci, v in enumerate(vals, start=1):
             cell = ws.cell(row=r, column=ci, value=v)
             cell.alignment = Alignment(vertical="top", wrap_text=True)
             cell.border = BORDER
-            color = BLACK
             if ci == 5:                     # the value column
-                color = GREEN if green else BLACK
-                cell.font = Font(color=color, bold=green)
-            elif ci == 7:
-                color = GREEN if green else (WARN if "PLACEHOLDER" in status or "⚠" in status else BLACK)
+                cell.font = Font(color=GREEN if green else BLACK, bold=green)
+            elif ci == 7:                   # the status column
+                color = (GREEN if green else
+                         WARN if ("PLACEHOLDER" in status.upper()
+                                  or "SUSPECT" in status.upper()) else BLACK)
                 cell.font = Font(color=color, size=10)
             else:
                 cell.font = Font(color=BLACK, size=10)
@@ -503,7 +281,8 @@ for section, rows in P:
 r += 1
 ws.cell(row=r, column=1, value="Legend:").font = Font(bold=True)
 ws.cell(row=r, column=2, value="GREEN value = confirmed for the CURRENT car/driver (or MEASURED). "
-        "Black = report car, guess, rules, or sim-tuned. Orange status = placeholder/needs attention.")
+        "Black = report car, guess, rules, or sim-tuned. Orange status = placeholder/needs attention. "
+        "Every row is generated from a params.yaml file — edit the number there, not here.")
 ws.cell(row=r, column=2).font = Font(color=BLACK, size=10)
 ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=len(H1))
 
@@ -539,7 +318,10 @@ for row in T:
             cell.font = Font(color=BLACK, size=10)
     r += 1
 
+os.makedirs(os.path.dirname(OUT), exist_ok=True)
 wb.save(OUT)
-print(f"wrote {OUT}")
+n_params = sum(len(cfg.section_params(ns)) for ns, _ in cfg.section_list())
+print(f"wrote {OUT}  ({n_params} parameters in "
+      f"{len(cfg.section_list())} sections, generated from the params.yaml files)")
 print("Import to Google Sheets: drag the file into drive.google.com — "
       "colors and layout carry over.")

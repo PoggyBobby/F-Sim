@@ -1,9 +1,12 @@
 namespace: numerical
+order: 120
+title: "NUMERICAL GUARDS"
 
 about: >
   Not car data — solver guards. Leave alone unless the sim misbehaves.
 
 v_eps:
+  label:  "Low-speed guard"
   value:  0.5
   unit:   m/s
   symbol: v_eps

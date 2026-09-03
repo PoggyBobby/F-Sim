@@ -1,10 +1,13 @@
 namespace: geometry
+order: 30
+title: "GEOMETRY & CG"
 
 about: >
   Whole-vehicle geometry and CG. The sim is a single rigid body, so these are
   vehicle values, not sprung-mass values.
 
 wheelbase:
+  label:  "Wheelbase"
   value:  1.52
   unit:   m
   symbol: L
@@ -18,6 +21,7 @@ wheelbase:
     1.524 — 4 mm off; the vehicle-CG pair is used here.
 
 track_front:
+  label:  "Front track"
   value:  1.34
   unit:   m
   symbol: t_f
@@ -30,6 +34,7 @@ track_front:
   why:    Lever arm for front lateral load transfer.
 
 track_rear:
+  label:  "Rear track"
   value:  1.34
   unit:   m
   symbol: t_r
@@ -42,6 +47,7 @@ track_rear:
     per N*m of split.
 
 weight_fraction_front:
+  label:  "Front weight fraction"
   value:  0.4344
   unit:   "-"
   display_unit: 0-1
@@ -65,6 +71,7 @@ weight_fraction_front:
     car-only measurement until the team repeats the weighing seated.
 
 h_cg:
+  label:  "CG height"
   value:  0.23
   unit:   m
   symbol: h
@@ -81,6 +88,7 @@ h_cg:
     ~0.226 m, so 0.23 is fine as-is.
 
 I_z:
+  label:  "Yaw inertia"
   value:  70.38
   unit:   kg*m^2
   symbol: I_z

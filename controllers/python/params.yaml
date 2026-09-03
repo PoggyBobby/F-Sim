@@ -1,4 +1,6 @@
 namespace: controllers
+order: 100
+title: "CONTROLLER GAINS — tuned in-sim; retune whenever vehicle/tire numbers move"
 
 about: >
   Tuned controller gains — retuned 2026-08-29 against the report-based car
@@ -9,6 +11,7 @@ about: >
   These are NOT car data. They are a design output of this sim.
 
 kp_sdiff:
+  label:  "s-diff proportional gain"
   value:  15.0
   unit:   N*m/(rad/s)
   symbol: Kp
@@ -19,6 +22,7 @@ kp_sdiff:
   why:    How hard the s-diff fights wheel-speed error.
 
 ki_sdiff:
+  label:  "s-diff integral gain"
   value:  60.0
   unit:   N*m/rad
   symbol: Ki
@@ -29,6 +33,7 @@ ki_sdiff:
   why:    Removes steady error (e.g. constant-radius corners).
 
 i_sdiff_max:
+  label:  "s-diff integral clamp"
   value:  60.0
   unit:   N*m
   symbol: "-"
@@ -39,6 +44,7 @@ i_sdiff_max:
   why:    Stops the integral charging up during saturation and overshooting after.
 
 dt_sdiff_max:
+  label:  "s-diff torque-split clamp"
   value:  80.0
   unit:   N*m
   symbol: dT_max
@@ -53,6 +59,7 @@ dt_sdiff_max:
     the cap. The s-diff's job is trimming wheel speeds, not large torque moves.
 
 kp_tv:
+  label:  "TV proportional gain"
   value:  2500.0
   unit:   N*m/(rad/s)
   symbol: Kp
@@ -63,6 +70,7 @@ kp_tv:
   why:    How hard TV chases the yaw reference.
 
 ki_tv:
+  label:  "TV integral gain"
   value:  1000.0
   unit:   N*m/rad
   symbol: Ki
@@ -73,6 +81,7 @@ ki_tv:
   why:    Steady-state yaw accuracy in long corners.
 
 i_tv_max:
+  label:  "TV integral clamp"
   value:  200.0
   unit:   N*m
   symbol: "-"
@@ -83,6 +92,7 @@ i_tv_max:
   why:    Bounds windup when the reference is unreachable (e.g. full lock at speed).
 
 mz_max:
+  label:  "Yaw-moment clamp"
   value:  600.0
   unit:   N*m
   symbol: Mz_max
@@ -93,6 +103,7 @@ mz_max:
   why:    Keeps TV authority bounded.
 
 ay_frac:
+  label:  "Reference aggressiveness"
   value:  0.95
   unit:   "-"
   display_unit: 0-1

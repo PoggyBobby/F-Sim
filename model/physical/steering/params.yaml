@@ -1,4 +1,6 @@
 namespace: steering
+order: 60
+title: "STEERING GEOMETRY"
 
 about: >
   Steering geometry. The handwheel-to-road-wheel MAP is a sensor concern and
@@ -6,6 +8,7 @@ about: >
   inner/outer split the linkage delivers.
 
 ackermann_fraction:
+  label:  "Ackermann fraction"
   value:  0.0
   unit:   "-"
   symbol: pct_A

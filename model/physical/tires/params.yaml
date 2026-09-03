@@ -1,4 +1,6 @@
 namespace: tires
+order: 80
+title: "TIRES — TTC ROUND 9 FIT (R20 compound, 2026-08-31); surrogate sizes, road µ = belt × 0.67 pending skidpad"
 
 about: >
   WARNING: the 1ME295B report contains NO tire GRIP data. Its "tire stiffness"
@@ -25,6 +27,7 @@ about: >
   Model: simplified Magic Formula + friction ellipse (separate mu_x).
 
 mu_road_scale:
+  label:  "Belt→road grip scale"
   value:  0.67
   unit:   "-"
   symbol: "-"
@@ -40,6 +43,7 @@ mu_road_scale:
     left. VALIDATE on skidpad; that measurement replaces this guess with truth.
 
 belt_mu_lat:
+  label:  "Belt peak µ, lateral"
   value:  2.593
   unit:   "-"
   symbol: mu_belt_y
@@ -50,6 +54,7 @@ belt_mu_lat:
   why:    Scaled by mu_road_scale to give the road value the sim uses.
 
 belt_mu_long:
+  label:  "Belt peak µ, longitudinal"
   value:  2.359
   unit:   "-"
   symbol: mu_belt_x
@@ -60,6 +65,7 @@ belt_mu_long:
   why:    Scaled by mu_road_scale to give the road value the sim uses.
 
 mu0:
+  label:  "Peak friction coefficient"
   derived: tires.mu_road_scale * tires.belt_mu_lat
   unit:   "-"
   symbol: mu0
@@ -72,6 +78,7 @@ mu0:
     most important number in the sim.
 
 mu0_long:
+  label:  "Peak longitudinal friction"
   derived: tires.mu_road_scale * tires.belt_mu_long
   unit:   "-"
   symbol: mu0x
@@ -84,6 +91,7 @@ mu0_long:
   why:    Sets wheelspin threshold and traction capability.
 
 s_mu:
+  label:  "Load sensitivity"
   value:  0.112
   unit:   "-"
   display_unit: —/100% load
@@ -100,6 +108,7 @@ s_mu:
     Zero would make TV pointless.
 
 Fz_nom:
+  label:  "Nominal tire load"
   derived: (mass.car_no_driver + mass.driver) * environment.g / 4.0
   unit:   N
   symbol: Fz_nom
@@ -110,6 +119,7 @@ Fz_nom:
   why:    Reference point for the load-sensitivity line.
 
 c_alpha_front:
+  label:  "Front cornering stiffness"
   value:  37.0
   unit:   1/rad
   symbol: c_alpha_f
@@ -124,6 +134,7 @@ c_alpha_front:
     K_us the TV reference uses.
 
 c_alpha_rear:
+  label:  "Rear cornering stiffness"
   value:  37.0
   unit:   1/rad
   symbol: c_alpha_r
@@ -138,6 +149,7 @@ c_alpha_rear:
     transfer, aero split and tire load sensitivity.
 
 c_kappa:
+  label:  "Longitudinal slip stiffness"
   value:  41.9
   unit:   1/slip
   symbol: c_kappa
@@ -150,6 +162,7 @@ c_kappa:
   why:    Sets wheel-spin dynamics speed — the s-diff's plant. Gains retune if it moves.
 
 shape_c_lat:
+  label:  "Lateral shape factor"
   value:  1.397
   unit:   "-"
   symbol: C_y
@@ -162,6 +175,7 @@ shape_c_lat:
     ~6-10 deg) and how it lets go.
 
 curv_e_lat:
+  label:  "Lateral curvature factor"
   value:  0.365
   unit:   "-"
   symbol: E_y
@@ -172,6 +186,7 @@ curv_e_lat:
   why:    Gentle vs snappy breakaway — currently more forgiving than a real slick.
 
 shape_c_long:
+  label:  "Longitudinal shape factor"
   value:  1.705
   unit:   "-"
   symbol: C_x
@@ -182,6 +197,7 @@ shape_c_long:
   why:    Sets the peak slip ratio (~0.10) — also the replay's red-wheel spin threshold.
 
 curv_e_long:
+  label:  "Longitudinal curvature factor"
   value:  0.389
   unit:   "-"
   symbol: E_x

@@ -1,4 +1,6 @@
 namespace: aero
+order: 50
+title: "AERO"
 
 about: >
   Entered the way the report gives it: coefficients + frontal area. The sim
@@ -6,6 +8,7 @@ about: >
   above them, never the products.
 
 cl_coeff:
+  label:  "Lift coefficient"
   value:  3.18
   unit:   "-"
   symbol: C_L
@@ -16,6 +19,7 @@ cl_coeff:
   why:    Downforce = 0.5*rho*C_L*A*v^2 — free grip that grows with speed^2.
 
 cd_coeff:
+  label:  "Drag coefficient"
   value:  1.36
   unit:   "-"
   symbol: C_D
@@ -26,6 +30,7 @@ cd_coeff:
   why:    Sets top-speed force budget and the torque needed to hold speed in every maneuver.
 
 frontal_area:
+  label:  "Frontal area"
   value:  1.106
   unit:   m^2
   symbol: A_F
@@ -36,6 +41,7 @@ frontal_area:
   why:    Only the products C*A enter the physics — keep coefficient and area consistent.
 
 ClA:
+  label:  "ClA (computed)"
   derived: aero.cl_coeff * aero.frontal_area
   unit:   m^2
   symbol: C_L*A
@@ -46,6 +52,7 @@ ClA:
   why:    "-"
 
 CdA:
+  label:  "CdA (computed)"
   derived: aero.cd_coeff * aero.frontal_area
   unit:   m^2
   symbol: C_D*A
@@ -56,6 +63,7 @@ CdA:
   why:    "-"
 
 balance_front:
+  label:  "Aero balance"
   value:  0.45
   unit:   "-"
   display_unit: 0-1

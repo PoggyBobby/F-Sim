@@ -1,4 +1,6 @@
 namespace: sensors.wheel_speed
+order: 93
+title: "SENSORS — WSS, motor resolver over CAN"
 
 about: >
   WSS. There is NO separate wheel-speed sensor on this car: "wheel speed" is
@@ -6,6 +8,7 @@ about: >
   divides by the upright planetary ratio.
 
 quant_rpm:
+  label:  "WSS quantization"
   value:  1.0
   unit:   rpm/LSB
   symbol: "-"

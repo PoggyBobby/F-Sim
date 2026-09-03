@@ -31,6 +31,7 @@ from model.maneuvers.tracks import track_maneuvers, model_for, CORNER_TYPES
 import model.maneuvers.tracks as _tracks
 from model.sim import run_matrix, print_table
 from style import RC, CONFIG_COLORS, REF_COLOR, config_lw, config_z
+import runlog
 from runlog import RunRecorder
 
 METRIC_COLS = ["yaw RMSE [rad/s]", "max |beta| [deg]", "dw RMSE [rad/s]",
@@ -352,7 +353,7 @@ def main():
     import matplotlib.pyplot as plt
     plt.rcParams.update(RC)
 
-    # all numbers come from car_data.py (the master data file)
+    # all numbers come from the params.yaml files (via model/config.py)
     vp, tp_f, tp_r, cp = default_setup()
     model = VehicleModel(vp, MagicFormulaTire(tp_f), MagicFormulaTire(tp_r))
     maneuvers = build_maneuvers(args, vp,
@@ -390,7 +391,7 @@ def main():
     print("SJSU Spartan Racing — software-diff / torque-vectoring basic sim")
     print(f"  total mass {vp.m_total:.0f} kg, wheelbase {vp.wheelbase:.2f} m, "
           f"peak wheel torque {vp.T_wheel_max:.0f} N·m/side"
-          "  (sources/tags: car_data.py)")
+          "  (sources/tags: the params.yaml files)")
     print(f"  configs: {' | '.join(config_names)}")
     print("  feedback: " + ("PERFECT STATE (sensor stack bypassed)"
                             if args.perfect_state else
@@ -462,7 +463,7 @@ def main():
                       "  (maneuver value, metrics not comparable)")
         print(f"    SAME     {len(d['unchanged'])} parameters unchanged")
         code_moved = [f for f in c["changed"] + c["added"]
-                      if f != "car_data.py"]
+                      if f not in runlog.DATA_FILES]
         print("    CODE     " + (", ".join(code_moved) if code_moved
                                  else "unchanged (model source identical)"))
     print(f"  read:  {os.path.join(run_dir, 'summary.md')}"

@@ -1,4 +1,6 @@
 namespace: drivetrain
+order: 40
+title: "WHEELS & DRIVETRAIN"
 
 about: >
   Wheels, gearing, motors and the power limits.
@@ -13,6 +15,7 @@ about: >
   (kit manual; exact motor data sheet: Motor_data_sheet_A2370DD_DD5).
 
 tire_outer_diameter:
+  label:  "Tire outer diameter"
   value:  18.0
   unit:   in
   display_unit: m (18 in OD)
@@ -24,6 +27,7 @@ tire_outer_diameter:
   why:    The rim size does not enter the sim — only the tire's rolling radius does.
 
 wheel_radius:
+  label:  "Tire radius (loaded)"
   derived: drivetrain.tire_outer_diameter / 2.0
   unit:   m
   display_unit: m (18 in OD / 2)
@@ -38,6 +42,7 @@ wheel_radius:
     measure axle-center height with the car on the ground to refine.
 
 gear_ratio:
+  label:  "Upright planetary ratio"
   value:  13.0
   unit:   "-"
   symbol: gr
@@ -57,6 +62,7 @@ gear_ratio:
     CHOICE, not inherited.
 
 motor_torque_peak:
+  label:  "Motor peak torque"
   value:  21.0
   unit:   N*m
   symbol: T_pk
@@ -67,6 +73,7 @@ motor_torque_peak:
   why:    x13 gear = 273 N*m per wheel — the ceiling every torque command lives under.
 
 pack_voltage:
+  label:  "Pack voltage"
   value:  380.0
   unit:   V
   symbol: V_DC
@@ -80,6 +87,7 @@ pack_voltage:
     2-rear build tops out at ~40 kW, so the 80 kW cap is unreachable until 4WD.
 
 motor_power_peak:
+  label:  "Motor peak power"
   value:  20000.0
   unit:   W
   symbol: P_pk
@@ -97,6 +105,7 @@ motor_power_peak:
     21 N*m * (13 krpm*380/600) = 18.1 kW -> 20 kW adopted.
 
 motor_max_speed:
+  label:  "Motor max speed"
   value:  20000
   unit:   rpm
   display_unit: rad/s (entered as 20,000 rpm)
@@ -111,6 +120,7 @@ motor_max_speed:
     completeness and future top-speed studies.
 
 I_wheel:
+  label:  "Wheel spin inertia"
   value:  0.35
   unit:   kg*m^2
   symbol: I_w
@@ -129,6 +139,7 @@ I_wheel:
     I_w = 3.033 was rejected: ~10x too large for one corner.
 
 power_cap_total:
+  label:  "Total power cap"
   value:  80000.0
   unit:   W
   symbol: P_max
@@ -141,6 +152,7 @@ power_cap_total:
     modeled) — the real car hits it ~10-15% earlier.
 
 regen_speed_cutoff:
+  label:  "Regen speed cutoff"
   value:  1.4
   unit:   m/s
   display_unit: m/s (~5 km/h)
