@@ -1,10 +1,12 @@
 """Track (corner) test catalog — the test matrix for ranking the torque
 allocation modes.
 
-The five corner types from the s-diff plan, 2–3 radii each:
+The five corner types from the s-diff plan, 2–3 radii each, plus one
+split-µ case:
 
     30°, 45°, 90°, 120°, U-turn (180°)          entry at 90 % of √(µ g R)
     throttle STEP to full at the apex             then unwind onto a straight
+    split-µ: the 90° corner with the INNER rear on a low-grip patch
 
 Each test is one `TrackManeuver`. Unlike the scripted maneuvers in
 maneuvers.py these are driven CLOSED-LOOP by a minimal "driver
@@ -29,16 +31,17 @@ feed-forward), peak torque (apex step), tire µ₀ (entry speed).
 
 Recorded per test (Maneuver.params, so runs can never be confused):
     corner_deg, radius_m, entry_speed_mps, entry_frac, apex_throttle_pct,
-    direction (+1 left, −1 right)
+    direction (+1 left, −1 right), mu_inner_scale (split-µ only)
 """
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import car_data as cd
 from maneuvers import Maneuver, _ramp
 from params import VehicleParams, G, RHO_AIR
-from vehicle import IVX, IPSI
+from tire import MagicFormulaTire
+from vehicle import VehicleModel, IVX, IPSI
 
 # ── the catalog ──────────────────────────────────────────────────────────
 # slug -> (corner angle [deg], default radii [m]). Radii are chosen so the
@@ -53,8 +56,14 @@ CORNER_TYPES = {
     "u_turn": (180.0, (4.5, 6.5, 9.0)),
 }
 
+# split-µ case: (corner slug, radius, µ scale on the INNER rear tire).
+# Where the LSD-style s-diff and per-wheel slip control differ most.
+SPLIT_MU_CASE = ("90deg", 9.0, 0.6)
+
 DEFAULT_ENTRY_FRAC = 0.9        # entry speed = frac · √(µ g R)   (plan §3)
 DEFAULT_THROTTLE_PCT = 100.0    # apex step, % of peak axle torque (plan §3)
+
+WHEEL_INDEX = {"FL": 0, "FR": 1, "RL": 2, "RR": 3}
 
 
 def entry_speed(radius, mu=None, frac=DEFAULT_ENTRY_FRAC):
@@ -160,13 +169,15 @@ class TrackDriver:
 @dataclass
 class TrackManeuver(Maneuver):
     driver: TrackDriver = None       # closed-loop inputs (sim.py prefers it)
+    mu_patch: dict = None            # wheel index -> µ scale (split-µ), or None
     corner_deg: float = 0.0
     radius_m: float = 0.0
 
 
 def track_maneuver(vp: VehicleParams, corner_slug, radius, throttle_pct=None,
-                   entry_frac=None, direction=1, t_exit=2.0):
-    """One corner test."""
+                   entry_frac=None, direction=1, mu_inner_scale=None,
+                   t_exit=2.0):
+    """One corner test. mu_inner_scale ≠ None makes it the split-µ case."""
     if corner_slug not in CORNER_TYPES:
         raise KeyError(f"unknown corner type {corner_slug!r}; "
                        f"known: {', '.join(CORNER_TYPES)}")
@@ -197,14 +208,24 @@ def track_maneuver(vp: VehicleParams, corner_slug, radius, throttle_pct=None,
               "apex_throttle_pct": throttle_pct, "direction": float(direction),
               "duration_s": duration}
 
+    mu_patch = None
+    if mu_inner_scale is not None:
+        inner = WHEEL_INDEX["RL" if direction >= 0 else "RR"]
+        mu_patch = {inner: mu_inner_scale}
+        slug += "_splitmu"
+        name += f" split-µ (inner ×{mu_inner_scale:g})"
+        desc += f", inner rear µ ×{mu_inner_scale:g}"
+        params["mu_inner_scale"] = mu_inner_scale
+
     return TrackManeuver(name, slug, duration, v0, inputs, desc,
-                         params=params, driver=drv,
+                         params=params, driver=drv, mu_patch=mu_patch,
                          corner_deg=theta_deg, radius_m=radius)
 
 
 def track_maneuvers(vp: VehicleParams, types=("all",), radius=None,
-                    throttle_pct=None, entry_frac=None, direction=1):
-    """The test matrix. types: corner slugs or 'all'.
+                    throttle_pct=None, entry_frac=None, direction=1,
+                    split_mu=True):
+    """The test matrix. types: corner slugs, 'split_mu', or 'all'.
     radius: override every corner type's radius list with this one value."""
     types = list(types or ["all"])
     want_all = "all" in types
@@ -215,8 +236,30 @@ def track_maneuvers(vp: VehicleParams, types=("all",), radius=None,
         for R in ((radius,) if radius else radii):
             mans.append(track_maneuver(vp, slug, R, throttle_pct, entry_frac,
                                        direction))
-    unknown = [t for t in types if t not in CORNER_TYPES and t != "all"]
+    if split_mu and (want_all or "split_mu" in types):
+        cs, R, scale = SPLIT_MU_CASE
+        mans.append(track_maneuver(vp, cs, radius or R, throttle_pct,
+                                   entry_frac, direction, mu_inner_scale=scale))
+    unknown = [t for t in types if t not in CORNER_TYPES
+               and t not in ("all", "split_mu")]
     if unknown:
         raise KeyError(f"unknown track selection {unknown}; known: "
-                       f"{', '.join(list(CORNER_TYPES) + ['all'])}")
+                       f"{', '.join(list(CORNER_TYPES) + ['split_mu', 'all'])}")
     return mans
+
+
+# ── split-µ plant ────────────────────────────────────────────────────────
+def model_for(maneuver, base_model: VehicleModel) -> VehicleModel:
+    """The plant to run this maneuver on. Plain maneuvers get the base
+    model back unchanged; a split-µ TrackManeuver gets a copy whose patched
+    wheel(s) carry a scaled tire µ (lateral AND longitudinal). The
+    CONTROLLER is never told — the patch is a surprise, as on the road."""
+    patch = getattr(maneuver, "mu_patch", None)
+    if not patch:
+        return base_model
+    tires = list(base_model.tires)
+    for idx, scale in patch.items():
+        tp = tires[idx].p
+        tires[idx] = MagicFormulaTire(replace(tp, mu0=tp.mu0 * scale,
+                                              mu0x=tp.mu0x * scale))
+    return VehicleModel(base_model.p, tires[0], tires[2], tires=tuple(tires))
