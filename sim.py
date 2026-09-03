@@ -73,6 +73,7 @@ def simulate(model: VehicleModel, controller, maneuver, dt=2.5e-4, log_every=4,
         t = k * dt
         delta, T_req = (driver(t, s) if driver is not None
                         else maneuver.inputs(t))
+        delta, T_req = maneuver.inputs(t)
         if k % ctrl_every == 0 or dbg is None:
             if sensors is None:
                 dbg = controller.update(s, delta, T_req, dt * ctrl_every)

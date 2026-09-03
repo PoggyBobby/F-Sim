@@ -312,6 +312,7 @@ def main():
                          f"(default {_tracks.DEFAULT_ENTRY_FRAC:g})")
     tg.add_argument("--track-right", action="store_true",
                     help="right-hand corners instead of left-hand")
+                             "pedal_check"])
     ap.add_argument("--perfect-state", action="store_true",
                     help="bypass the sensor stack: controller reads the "
                          "sim's true state (pre-2026-08-31 behavior)")
@@ -397,6 +398,8 @@ def main():
         # every other maneuver gets the base model back unchanged
         results = run_matrix(model_for(man, model), controllers, man, dt=dt,
                              sensors=sensors, ctrl_every=ctrl_every)
+        results = run_matrix(model, controllers, man, dt=dt, sensors=sensors,
+                             ctrl_every=ctrl_every)
         print_table(man, results)
         print(f"    ({time.time() - t0:.1f} s of compute)")
 
