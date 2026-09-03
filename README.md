@@ -127,9 +127,15 @@ the VCU rate (`VCU_RATE_HZ`, default 100 Hz), never the sim's perfect state:
 | **SAS** | handwheel angle → road-wheel estimate through the team's steering-chart map |
 
 Two things the VCU must live without, exactly like the real one: there is
-**no vx sensor** (speed is estimated from wheel speeds — the slower rear
-while driving, the faster while braking), and steering is only known through
-the map. The **FSAE EV.4.7 APPS/BPS plausibility check** is implemented
+**no vx sensor**, and steering is only known through the map. What the VCU
+*derives* from those readings (all logged, all in `SensorReadings`):
+
+| estimate | how |
+|---|---|
+| `vx_wheel_est` | each rear wheel referred to the CG with the gyro (`ω·r_w ± r·t/2` — the inner wheel really is slower, so without this every corner reads low), then the slower one while driving, the faster while braking |
+| `vx_est` | the above fused with the IMU: 2-state kinematic predictor (`v̇x = ax + r·vy`, `v̇y = ay − r·vx`) pulled toward the wheel value, slowly when they disagree by more than a gate (both rears spinning together — full-throttle exit). Constants `VX_EST_*` in `car_data.py`; `VX_EST_USE_IMU = False` gives wheel-only back. Measured on corner exit before any spin: wheel-only 0.4–0.7 m/s rms, yaw-corrected 0.14, fused 0.07–0.10 |
+| `v_ground_RL/RR`, `kappa_est_RL/RR` | ground speed under each rear contact patch (`vx_est ∓ r·t/2`) and the per-wheel **slip-ratio estimate** — the input a per-wheel slip limiter (plan Stage 3) needs; logged as `kRL_est`/`kRR_est` next to the true `kRL`/`kRR` |
+| `dw_geo` | the rear wheel-speed difference steering geometry explains, `v·t·tan(δ)/(L·r_w)` — what an LSD-style law subtracts before acting; exactly 0 with the wheel straight | The **FSAE EV.4.7 APPS/BPS plausibility check** is implemented
 (>25% throttle while braking cuts power until APPS < 5%) and demonstrated by
 the `pedal_check` maneuver — watch the torque hold zero through the overlap.
 Sensor noise is seeded: runs are repeatable and every config sees identical
