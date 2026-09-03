@@ -21,6 +21,7 @@ CONFIG_COLORS = {
     "s-diff":       "#eb6834",   # orange
     "TV":           "#1baf7a",   # aqua
     "s-diff + TV":  "#eda100",   # yellow (drawn last + slightly thicker)
+    "VCU (SIL)":    "#8a63d2",   # violet — the real firmware in the loop
 }
 
 # ── status: reserved, never used as a series color ───────────────────────

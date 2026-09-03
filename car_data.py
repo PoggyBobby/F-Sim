@@ -340,6 +340,12 @@ ACKERMANN_FRACTION = 0.0                # PLACEHOLDER — parallel steer
 #        for the current gains (verify.py section H).
 VCU_RATE_HZ = 100.0                     # PLACEHOLDER — ask software team
 
+# What:  software-in-the-loop (vcu_sil.py): how long the real firmware is
+#        left to boot — bench check (55 ms) + ADC settle loop (1 s) — before
+#        a maneuver's t = 0, measured on the firmware's own clock.
+# Unit:  s
+VCU_SIL_BOOT_S = 1.5                    # PLACEHOLDER — from main.c / initializations.c
+
 # What:  steering map — handwheel angle x [deg] to road-wheel angle [deg],
 #        the team chart's LWheel curve: y = A0 + A1·x + A2·x².
 #        Used odd-symmetrically (sign(x)·map(|x|)) and centered so

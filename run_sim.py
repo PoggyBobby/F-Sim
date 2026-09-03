@@ -312,7 +312,9 @@ def main():
                          f"(default {_tracks.DEFAULT_ENTRY_FRAC:g})")
     tg.add_argument("--track-right", action="store_true",
                     help="right-hand corners instead of left-hand")
-                             "pedal_check"])
+    ap.add_argument("--sil", action="store_true",
+                    help="add the real VCU firmware as a fifth config, "
+                         "software-in-the-loop (build it first: make -C sil)")
     ap.add_argument("--perfect-state", action="store_true",
                     help="bypass the sensor stack: controller reads the "
                          "sim's true state (pre-2026-08-31 behavior)")
@@ -356,6 +358,11 @@ def main():
     maneuvers = build_maneuvers(args, vp,
                                 interactive=args.ask and sys.stdin.isatty())
     config_names = [c.name for c in make_configs(vp, tp_f, tp_r, cp)]
+    if args.sil:
+        if args.perfect_state:
+            ap.error("--sil needs the sensor stack; drop --perfect-state")
+        from vcu_sil import SilController, SIL_NAME
+        config_names.append(SIL_NAME)
 
     # sensor stack: the controller reads WSS/IMU/SAS/APPS/BPS at the VCU
     # rate — the default since 2026-08-31 (--perfect-state to bypass)
@@ -374,6 +381,7 @@ def main():
                                     args.maneuver, "replay_fps": args.fps,
                                     "animated": bool(args.animate),
                                     "sensor_stack": not args.perfect_state,
+                                    "sil": bool(args.sil),
                                     "vcu_rate_hz": (cd.VCU_RATE_HZ
                                                     if not args.perfect_state
                                                     else "physics rate")})
@@ -394,6 +402,8 @@ def main():
     for man in maneuvers:
         t0 = time.time()
         controllers = make_configs(vp, tp_f, tp_r, cp)
+        if args.sil:
+            controllers.append(SilController(vp))
         # split-µ track tests run on a patched plant (tracks.model_for);
         # every other maneuver gets the base model back unchanged
         results = run_matrix(model_for(man, model), controllers, man, dt=dt,
@@ -401,6 +411,8 @@ def main():
         results = run_matrix(model, controllers, man, dt=dt, sensors=sensors,
                              ctrl_every=ctrl_every)
         print_table(man, results)
+        if args.sil:
+            print("    " + controllers[-1].summary())
         print(f"    ({time.time() - t0:.1f} s of compute)")
 
         rec.add_results(man, results)

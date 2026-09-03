@@ -48,9 +48,10 @@ LABEL_OFFSETS = {
     "s-diff": (0.26, -0.16),
     "TV": (-0.26, -0.16),
     "s-diff + TV": (0.0, -0.30),
+    "VCU (SIL)": (0.0, 0.34),
 }
 SHORT_NAMES = {"open (50/50)": "open", "s-diff": "s-diff", "TV": "TV",
-               "s-diff + TV": "s-diff + TV"}
+               "s-diff + TV": "s-diff + TV", "VCU (SIL)": "VCU"}
 
 
 def _rot(pts, ang):
