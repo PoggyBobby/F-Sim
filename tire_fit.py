@@ -1,5 +1,5 @@
 """TTC → Magic Formula fitter: turns Calspan raw tire data into the nine
-tire coefficients car_data.py needs.
+tire coefficients model/physical/tires/params.yaml needs.
 
     .venv/bin/python tire_fit.py --cornering ttc/…run31.mat ttc/…run32.mat \
         --drivebrake ttc/…run72.mat --pressure 12 --out ttc/fit_hoosier_r20
@@ -25,10 +25,10 @@ has none, and they belong to the specific test tire, not the model.
 ⚠️ BELT vs ASPHALT: Calspan's sandpaper belt grips harder than track
 asphalt. Common practice scales the fitted µ₀ by ~0.65–0.70 for real-road
 predictions. The fitter reports RAW BELT values; apply (and document) any
-road scaling when entering car_data.py — never silently.
+road scaling when entering the tire params — never silently.
 
 Output: fitted values + quality stats printed, comparison plots saved to
---out, and a ready-to-paste car_data.py block.
+--out, and a ready-to-paste params.yaml block.
 """
 
 import argparse
@@ -198,8 +198,8 @@ def main():
     a = ap.parse_args()
 
     if a.fznom is None:
-        import car_data as cd
-        a.fznom = cd.TIRE_FZ_NOM
+        from model.config import cfg
+        a.fznom = cfg.tires.Fz_nom
     os.makedirs(a.out, exist_ok=True)
 
     lat = stack(sum([glob.glob(p) for p in a.cornering], []), a.units)
@@ -244,7 +244,7 @@ def main():
     print(f"\nplots: {a.out}/fit_lateral.png"
           + (f", {a.out}/fit_longitudinal.png" if th_x is not None else ""))
     print("⚠️  belt→asphalt: common practice scales µ₀ by ~0.65–0.70 when "
-          "predicting on-track absolutes; document the choice in car_data.")
+          "predicting on-track absolutes; document the choice in the YAML.")
 
 
 if __name__ == "__main__":

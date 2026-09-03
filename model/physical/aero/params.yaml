@@ -1,0 +1,77 @@
+namespace: aero
+order: 50
+title: "AERO"
+
+about: >
+  Entered the way the report gives it: coefficients + frontal area. The sim
+  uses the products Cl*A and Cd*A, derived below — edit the three entries
+  above them, never the products.
+
+cl_coeff:
+  label:  "Lift coefficient"
+  value:  3.18
+  unit:   "-"
+  symbol: C_L
+  status: FROM REPORT (old car's aero)
+  what:   Lift (downforce) coefficient, referenced to frontal_area.
+  need:   Current car's downforce coefficient
+  how:    CFD, then straight-line coast-down / load-cell validation
+  why:    Downforce = 0.5*rho*C_L*A*v^2 — free grip that grows with speed^2.
+
+cd_coeff:
+  label:  "Drag coefficient"
+  value:  1.36
+  unit:   "-"
+  symbol: C_D
+  status: FROM REPORT (old car's aero)
+  what:   Drag coefficient, same reference area.
+  need:   Current car's drag coefficient
+  how:    CFD + coast-down test
+  why:    Sets top-speed force budget and the torque needed to hold speed in every maneuver.
+
+frontal_area:
+  label:  "Frontal area"
+  value:  1.106
+  unit:   m^2
+  symbol: A_F
+  status: FROM REPORT
+  what:   Aerodynamic frontal reference area.
+  need:   Projected frontal area
+  how:    CAD projection
+  why:    Only the products C*A enter the physics — keep coefficient and area consistent.
+
+ClA:
+  label:  "ClA (computed)"
+  derived: aero.cl_coeff * aero.frontal_area
+  unit:   m^2
+  symbol: C_L*A
+  status: DERIVED
+  what:   The downforce product the sim actually uses.
+  need:   "-"
+  how:    = C_L x A_F, never edited directly
+  why:    "-"
+
+CdA:
+  label:  "CdA (computed)"
+  derived: aero.cd_coeff * aero.frontal_area
+  unit:   m^2
+  symbol: C_D*A
+  status: DERIVED
+  what:   The drag product the sim actually uses.
+  need:   "-"
+  how:    = C_D x A_F, never edited directly
+  why:    "-"
+
+balance_front:
+  label:  "Aero balance"
+  value:  0.45
+  unit:   "-"
+  display_unit: 0-1
+  symbol: pct_aero_f
+  status: PLACEHOLDER — pure guess
+  what:   Fraction of total downforce landing on the FRONT axle (0.45 = 45/55).
+  need:   Center-of-pressure position
+  how:    CFD (aero team) — ask for CP height too
+  why: >
+    Moves grip between axles as speed rises — shapes high-speed balance
+    directly. One of the last pure guesses outside tires.

@@ -22,15 +22,16 @@ import time
 
 import matplotlib
 
-from params import default_setup
-from tire import MagicFormulaTire
-from vehicle import VehicleModel
-from controllers import make_configs
-from maneuvers import step_steer, corner_exit, slalom, pedal_check
-from tracks import track_maneuvers, model_for, CORNER_TYPES
-import tracks as _tracks
-from sim import run_matrix, print_table
+from model.params import default_setup
+from model.physical.tires.tire import MagicFormulaTire
+from model.physical.vehicle import VehicleModel
+from controllers.python.torque_split import make_configs
+from model.maneuvers.maneuvers import step_steer, corner_exit, slalom, pedal_check
+from model.maneuvers.tracks import track_maneuvers, model_for, CORNER_TYPES
+import model.maneuvers.tracks as _tracks
+from model.sim import run_matrix, print_table
 from style import RC, CONFIG_COLORS, REF_COLOR, config_lw, config_z
+import runlog
 from runlog import RunRecorder
 
 METRIC_COLS = ["yaw RMSE [rad/s]", "max |beta| [deg]", "dw RMSE [rad/s]",
@@ -352,7 +353,7 @@ def main():
     import matplotlib.pyplot as plt
     plt.rcParams.update(RC)
 
-    # all numbers come from car_data.py (the master data file)
+    # all numbers come from the params.yaml files (via model/config.py)
     vp, tp_f, tp_r, cp = default_setup()
     model = VehicleModel(vp, MagicFormulaTire(tp_f), MagicFormulaTire(tp_r))
     maneuvers = build_maneuvers(args, vp,
@@ -361,19 +362,19 @@ def main():
     if args.sil:
         if args.perfect_state:
             ap.error("--sil needs the sensor stack; drop --perfect-state")
-        from vcu_sil import SilController, SIL_NAME
+        from sil.vcu_sil import SilController, SIL_NAME
         config_names.append(SIL_NAME)
 
     # sensor stack: the controller reads WSS/IMU/SAS/APPS/BPS at the VCU
     # rate — the default since 2026-08-31 (--perfect-state to bypass)
-    import car_data as cd
+    from model.config import cfg
     dt = 2.5e-4
     if args.perfect_state:
         sensors, ctrl_every = None, 1
     else:
-        from sensors import SensorSuite
+        from model.sensors import SensorSuite
         sensors = SensorSuite(vp)
-        ctrl_every = max(1, int(round(1.0 / (dt * cd.VCU_RATE_HZ))))
+        ctrl_every = max(1, int(round(1.0 / (dt * cfg.sensors.vcu.rate_hz))))
 
     rec = RunRecorder(label=args.label, note=args.note, csv_hz=args.csv_hz,
                       runs_dir=args.runs_dir,
@@ -382,7 +383,7 @@ def main():
                                     "animated": bool(args.animate),
                                     "sensor_stack": not args.perfect_state,
                                     "sil": bool(args.sil),
-                                    "vcu_rate_hz": (cd.VCU_RATE_HZ
+                                    "vcu_rate_hz": (cfg.sensors.vcu.rate_hz
                                                     if not args.perfect_state
                                                     else "physics rate")})
     run_dir = rec.begin(maneuvers, config_names)
@@ -390,12 +391,12 @@ def main():
     print("SJSU Spartan Racing — software-diff / torque-vectoring basic sim")
     print(f"  total mass {vp.m_total:.0f} kg, wheelbase {vp.wheelbase:.2f} m, "
           f"peak wheel torque {vp.T_wheel_max:.0f} N·m/side"
-          "  (sources/tags: car_data.py)")
+          "  (sources/tags: the params.yaml files)")
     print(f"  configs: {' | '.join(config_names)}")
     print("  feedback: " + ("PERFECT STATE (sensor stack bypassed)"
                             if args.perfect_state else
                             f"sensor stack (WSS/IMU/SAS/APPS/BPS) at "
-                            f"{cd.VCU_RATE_HZ:g} Hz VCU rate"))
+                            f"{cfg.sensors.vcu.rate_hz:g} Hz VCU rate"))
     print(f"  run {rec.run_number:03d} '{rec.label}' -> {run_dir}\n")
 
     plots, replays, tables = [], [], {}
@@ -462,7 +463,7 @@ def main():
                       "  (maneuver value, metrics not comparable)")
         print(f"    SAME     {len(d['unchanged'])} parameters unchanged")
         code_moved = [f for f in c["changed"] + c["added"]
-                      if f != "car_data.py"]
+                      if f not in runlog.DATA_FILES]
         print("    CODE     " + (", ".join(code_moved) if code_moved
                                  else "unchanged (model source identical)"))
     print(f"  read:  {os.path.join(run_dir, 'summary.md')}"

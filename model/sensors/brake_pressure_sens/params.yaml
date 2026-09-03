@@ -1,0 +1,51 @@
+namespace: sensors.brake_pressure_sens
+order: 92
+title: "SENSORS — BPS, brake pressure"
+
+about: >
+  BPS — brake pressure sensor. Mechanical brakes are NOT modeled: in this sim
+  brake pressure commands REGEN only.
+
+range_bar:
+  label:  "BPS full range"
+  value:  100.0
+  unit:   bar
+  symbol: "-"
+  status: PLACEHOLDER — sensor spec
+  what:   Brake pressure sensor full range.
+  need:   BPS spec + brake system pressures
+  how:    "Brake team: line pressure at threshold/full braking"
+  why:    Sets the pressure that maps to full regen.
+
+quant_bar:
+  label:  "BPS quantization"
+  value:  0.5
+  unit:   bar/LSB
+  symbol: "-"
+  status: PLACEHOLDER — sensor spec
+  what:   Brake pressure sensor resolution.
+  need:   BPS spec
+  how:    Datasheet
+  why:    Regen command granularity.
+
+actuated_bar:
+  label:  "BPS actuated threshold"
+  value:  3.0
+  unit:   bar
+  symbol: "-"
+  status: PLACEHOLDER — calibration choice
+  what:   Pressure above which the brake counts as "actuated" for the rules check.
+  need:   Brake system pressures
+  how:    "Brake team: line pressure at threshold braking"
+  why:    Defines "braking" for the EV.4.7 plausibility check.
+
+t_regen_max:
+  label:  "Max regen torque"
+  value:  250.0
+  unit:   N*m
+  symbol: "-"
+  status: PLACEHOLDER — battery charge limit sets this
+  what:   Total rear-axle REGEN torque at full brake pressure (both motors).
+  need:   Allowed charge current -> torque
+  how:    "Accumulator team: max charge C-rate"
+  why:    Caps how much "braking" the sim's BPS can command.

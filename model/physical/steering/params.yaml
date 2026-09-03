@@ -1,0 +1,31 @@
+namespace: steering
+order: 60
+title: "STEERING GEOMETRY"
+
+about: >
+  Steering geometry. The handwheel-to-road-wheel MAP is a sensor concern and
+  lives in model/sensors/steering_angle/params.yaml — this file is only the
+  inner/outer split the linkage delivers.
+
+ackermann_fraction:
+  label:  "Ackermann fraction"
+  value:  0.0
+  unit:   "-"
+  symbol: pct_A
+  status: PLACEHOLDER (parallel) — RWheel curve needed
+  what: >
+    How much of the geometric (100%) Ackermann inner/outer steer split the
+    steering actually delivers. 0.0 = parallel steer (both fronts get the same
+    angle), 1.0 = full geometric Ackermann, negative = anti-Ackermann.
+  need:   "The steering curve: both wheels' angles vs handwheel angle"
+  how: >
+    From the steering chart: the LWheel curve is on file, need the RWheel
+    polynomial from the same chart (or a few x, LWheel, RWheel point triples).
+  why: >
+    Only matters at large steer angles: at 5 deg the split is ~+/-0.2 deg; at
+    the 23 deg full-lock hairpin it is ~+/-4 deg per wheel. Proven to flip
+    whether s-diff-only survives the hairpin (runs 007 vs 008).
+  note: >
+    ONE wheel's curve cannot give the Ackermann SPLIT — that is the DIFFERENCE
+    between the two wheels, and the fit is not valid through x=0, so the right
+    wheel cannot be mirror-derived. Until then the sim stays parallel-steer.

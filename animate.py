@@ -24,15 +24,15 @@ Reading the picture:
     directly as the paths separating.
 
 Nothing here is drawn to scale except the car: body, track, wheelbase and
-wheel size are the real numbers out of car_data.py.
+wheel size are the real numbers out of the params.yaml files.
 """
 
 import os
 
 import numpy as np
 
-from params import G
-from vehicle import front_steer_angles
+from model.params import G
+from model.physical.vehicle import front_steer_angles
 from style import (CONFIG_COLORS, STATUS_CRITICAL, SPIN_KAPPA_FALLBACK,
                    REF_COLOR, INK, INK_2, MUTED, ASPHALT, SURFACE,
                    config_lw, config_z)

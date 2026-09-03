@@ -1,0 +1,246 @@
+FSAE-Sim — textbook cross-check and code audit
+Branch: restructure
+Source: Yu & Vantsevich, checked against the tree as of this writing.
+
+Eight notes came out of comparing the sim's equations to the textbook.
+Grouped below by whether they actually move numbers. Three defects unrelated
+to the textbook are in section C; those have the largest effect of anything
+here.
+
+
+A. NO OUTPUT EFFECT — DOCUMENTATION ONLY
+========================================
+
+#1  Slip-ratio convention
+    Files: model/physical/vehicle.py:170, docs/BREAKDOWN.md:109
+    The sim uses the SAE form (w*rw - v)/v, unbounded. The book uses
+    (v_w - v)/v_w, bounded 0-1. The code is unchanged either way. The only
+    consequence is reading the number: model/sim.py:144 reports
+    "max |kappa|", and the kappa = 67 quoted in FINDINGS 8-bis is
+    SAE-convention. That same event reads about 0.985 under the book's
+    convention. Same physics, different label. Say which convention you are
+    quoting when talking to the full-model team.
+
+#2  Load-sensitivity form
+    Files: model/physical/tires/tire.py:43,50
+    Book (3.13) is quadratic in load: mu = mu0*(1 - c*Fz^2), 0 <= c <= 0.04.
+    The sim is linear in Fz/Fz_nom (Pacejka/TTC style). Not a conflict — the
+    sim's is fitted to real data, the book's is a generic approximation.
+    Swapping would lose information.
+
+#3  Tire model family
+    The book uses Burckhardt-type mu-curves, not the Magic Formula, so it
+    cannot verify the B/C/D/E fit — it only cites Pacejka. Nothing to change.
+
+
+B. REAL OUTPUT EFFECT
+=====================
+
+#5  Wheel-inertia term in the axle-load computation        [IMPLEMENTABLE NOW]
+    Files: model/physical/vehicle.py:96-128  (add the term to wheel_loads)
+           model/physical/vehicle.py:181-221 (restructure derivatives)
+    Book (3.48) includes -(Jwf*wdot_f + Jwr*wdot_r)/L in the front-axle load
+    — the drive-torque reaction. The sim has no such term; wheel_loads is
+    driven only by ax.
+
+    Sizing, with I_wheel = 0.35 kg*m^2 and L = 1.52 m:
+      - Normal acceleration (ax ~ 5 m/s^2, wdot ~ 22 rad/s^2):
+        about 10 N against a 1075 N front axle. Under 1%. Invisible.
+      - Full-torque wheelspin (wdot ~ 273/0.35 ~ 780 rad/s^2):
+        about 180 N per spinning wheel, up to 360 N for both — that is
+        17-33% of the front axle load, during exactly the event the s-diff
+        exists to fix.
+
+    Effect on results: moves "max |kappa|" and "max |beta|" in corner_exit
+    and the track runs; nothing else. Directionally it makes spin slightly
+    self-limiting (more rear load) while costing front grip.
+
+    Implementation cost: wdot depends on Fx which depends on Fz, so
+    ds[IWRL]/ds[IWRR] (currently computed after the loop, vehicle.py:215-216)
+    must move inside the 3-iteration fixed-point loop at vehicle.py:195-201.
+    That changes the convergence behaviour verify.py D4 certifies.
+    Apply the term equally to left and right on each axle so it stays a pure
+    front<->rear transfer summing to zero — otherwise verify.py B1 and G1
+    (exact Sum(Fz) identity, 1e-12 / 1e-9) fail.
+
+#6  Sideslip (beta) term in the TV controller
+    Files: controllers/python/torque_split.py (yaw_rate_ref, update, reset)
+           controllers/python/params.yaml     (new gains)
+           model/params.py:118-128            (ControlParams)
+    Book (14.4) pairs the yaw-rate target with a sideslip target and bounds
+    |beta| at roughly 6-9 deg for passenger cars. The sim has no beta term at
+    all: beta is logged at model/sim.py:103 and used only for the divergence
+    bail-out at model/sim.py:126. This is FINDINGS 8-bis — TV hits its capped
+    yaw target by rotating the car to 22 deg of sideslip.
+
+    Effect on results: changes every "TV" and "s-diff + TV" row in every
+    maneuver. "max |beta|" is a headline metric column and should fall
+    sharply. "yaw RMSE" will get WORSE for TV, and that is the design
+    working — it trades yaw tracking for stability. Requires a full retune
+    of kp_tv / ki_tv.
+
+    Watch: the new state must be cleared in reset()
+    (torque_split.py:100-103) or verify.py I5's bit-exact determinism check
+    and D2's mirror symmetry are exposed to state leaking between runs.
+
+#7  Lag on the yaw-rate reference
+    Files: controllers/python/torque_split.py:100-114, 117-151
+           controllers/python/params.yaml, model/params.py
+    The book notes the steady-state target should pass through a lag matching
+    the vehicle's transient response, otherwise the controller chases a step.
+    yaw_rate_ref() is a pure static map — no filter, no rate limit.
+
+    Effect on results: with kp_tv = 2500, a step-steer input produces an
+    instant yaw error that saturates Mz at the 600 N*m clamp. A lag softens
+    turn-in, so peak dT_tv drops. Changes step_steer and slalom.
+
+    Two catches:
+      - The lag would be integrated at dt * ctrl_every — 100 Hz in the
+        default sensor path, not the physics rate.
+      - metrics() computes yaw RMSE against log["r_ref"] itself
+        (model/sim.py:138). Change the reference and the metric changes
+        meaning, so that column stops being comparable to earlier runs.
+
+    Keep yaw_rate_ref() pure and apply the lag in update(), or verify.py F9
+    breaks: it calls yaw_rate_ref twice back-to-back with no dt and asserts
+    r2 >= r1, which becomes order-dependent.
+
+#8  Regen ramp near zero speed
+    Files: controllers/python/torque_split.py:194-195
+           model/physical/drivetrain/params.yaml
+    The book suggests a piecewise-linear ramp of regen with speed near zero
+    to avoid jerk. The sim has a hard step at 1.4 m/s.
+
+    Effect on results: NONE, in any current maneuver. pedal_check is the only
+    one that brakes: 30 bar gives T_req = -250 * 0.30 = -75 N*m, about
+    1.3 m/s^2, so it decays from 10 m/s to only about 8 m/s across the 1.5 s
+    brake window and never approaches the 1.4 m/s cutoff. This is a
+    correctness fix with zero effect on present results.
+
+    It would break verify.py F3, which probes _apply_limits at vx = 1.0 —
+    only 0.4 m/s below the step — and asserts no negative torque. Note also
+    that verify.py section G never runs pedal_check (verify.py:537), so the
+    regen path is covered only by the synthetic I3 unit test.
+
+#4  Lateral load-transfer split                    [BLOCKED ON SUSPENSION DATA]
+    Files: model/physical/vehicle.py:118-119
+           model/physical/loads/params.yaml
+    Book (10.43/10.44) splits transfer into a roll-moment part shared by roll
+    stiffness cphi_f/(cphi_f + cphi_r) acting through m*ay*(hs - h_roll),
+    plus a geometric part m_axle*ay*h_rollcentre/track. The sim uses one
+    constant, lat_transfer_frac_front, derived from the spring-rate ratio
+    19.3/(19.3+24.8) = 0.438. The total transfer is correct; only the
+    front/rear split is crude — the YAML note already says so.
+
+    Effect if implemented: changes which axle saturates first, so it moves
+    "max |ay|", "max |beta|" and "yaw RMSE" in every maneuver. This is the
+    understeer/oversteer balance knob.
+
+    Why it is blocked: needs roll-centre heights and a sprung/unsprung mass
+    split that do not exist yet (BREAKDOWN section 9, item 8, still owed by
+    the suspension team). It also breaks verify.py B3's exact 1e-12
+    "total lateral transfer = m*ay*h/track" assertion — that identity only
+    holds when the full mass goes through both paths.
+
+    Recommendation: record the target formula in loads/params.yaml and
+    BREAKDOWN 3.3 now; implement when the suspension numbers land.
+
+
+C. DEFECTS — LARGEST OUTPUT EFFECT OF ANYTHING HERE
+===================================================
+
+BUG 1  model/sim.py:76 kills the closed-loop track driver
+    Lines 74-76 read:
+        delta, T_req = (driver(t, s) if driver is not None
+                        else maneuver.inputs(t))
+        delta, T_req = maneuver.inputs(t)
+    Line 76 unconditionally overwrites lines 74-75, so TrackDriver is dead
+    code. Every TrackManeuver runs on the open-loop fallback at
+    model/maneuvers/tracks.py:197, which is drag-only feedforward — at 9 m/s
+    that is about 17 N*m total, versus the 546 N*m apex step the closed-loop
+    driver is meant to apply. There is also no unwind and no PI speed hold.
+
+    Effect: the corner tests are currently barely applying torque at all, so
+    the s-diff / TV comparison across all 12 corner cases is meaningless.
+    Deleting one line changes every track result.
+
+    Introduced by commit 7abfab7, eight minutes after c7aa948 added the
+    feature. Not caught by verify.py, which never runs a TrackManeuver.
+
+BUG 2  run_sim.py:410-413 discards the split-mu plant
+    The two calls read:
+        results = run_matrix(model_for(man, model), controllers, man, dt=dt,
+                             sensors=sensors, ctrl_every=ctrl_every)
+        results = run_matrix(model, controllers, man, dt=dt, sensors=sensors,
+                             ctrl_every=ctrl_every)
+    The second (line 412-413) overwrites the first, so the split-mu case runs
+    on a uniform-mu car. The "inner rear mu x 0.6" test is not testing
+    anything, and it costs double the compute. run_sim.py:410 is the only
+    call site of model_for in the tree.
+
+    Same shape as BUG 1 and likely the same merge — compare commit a6ae781,
+    "vehicle.py: remove stale lines left by the tracks merge".
+
+BUG 3  runlog.py:625-628 corrupts runs/index.csv
+    _append_index still looks up pre-restructure keys:
+        self.params.get("CAR_MASS_NO_DRIVER", ...)
+        self.params.get("DRIVER_MASS", ...)
+        self.params.get("TIRE_MU0", ...)
+    Snapshot keys are dotted config paths now (mass.car_no_driver,
+    tires.mu0), so total_mass_kg is nan and tire_mu0 is "" in every run row.
+    _write_summary:525-528 was updated correctly and uses cfg.mass.total /
+    cfg.tires.mu0. This is PROGRESS.md step 8, still unchecked.
+
+
+D. STALE DOCUMENTATION
+======================
+
+  - docs/BREAKDOWN.md:244 quotes K_us ~ +4.3e-4. But c_alpha_front and
+    c_alpha_rear are both 37.0 in model/physical/tires/params.yaml, so K_us
+    at controllers/python/torque_split.py:94 is EXACTLY 0. The yaw reference
+    is currently the pure kinematic vx*delta/L. The Eq. (9.17) understeer-
+    gradient code is correct and presently multiplied by zero. Worth
+    flagging that the equal front/rear c_alpha is a data artifact of the TTC
+    fit (same tire both ends), not a design choice.
+
+  - docs/FINDINGS.md:134-142 (finding 8-ter) says there is no Ackermann
+    geometry and cites vehicle.py:105. front_steer_angles() has implemented
+    it since 2026-08-30 (vehicle.py:46-76) and verify.py C5 covers it. Mark
+    resolved the way finding #1 was.
+
+  - README.md:73,365 and docs/FINDINGS.md:4 say 69 checks. The real count is
+    78, which README.md:416,658 and PROGRESS.md already say. Runtime is
+    quoted as both "~35 s" (run.sh:15, README.md:233) and "about 45 s"
+    (README.md:416).
+
+  - README.md, docs/BREAKDOWN.md and docs/PUBLISHING.md still reference
+    car_data.py, controllers.py and sensors.py. None exist post-restructure.
+    This is PROGRESS.md step 10.
+
+
+E. TWO THINGS TO KNOW BEFORE TOUCHING ANY OF IT
+===============================================
+
+  1. runs/ is gitignored (.gitignore:14-17) and absent from the working
+     tree. Runs 007 and 008 are gone — the artifacts behind FINDINGS 8-bis
+     and the Ackermann comparison no longer exist, only the written
+     conclusions. Regenerating them needs a re-run at 23 deg / 17.9 m/s with
+     ackermann_frac 0.0 and 1.0.
+
+  2. PROGRESS.md step 11 is unchecked, so verify.py has never been confirmed
+     green since the restructure. Establish that baseline
+     (.venv/bin/python verify.py, exit 0) before landing anything above.
+
+
+SUGGESTED ORDER
+===============
+  1. Baseline: run verify.py, confirm 78/78 on this branch.
+  2. Fix BUG 1 and BUG 2 (two deleted lines) — they gate whether any track
+     or split-mu result means anything. Land separately so later changes are
+     measured against a known-good baseline.
+  3. Fix BUG 3 (index.csv keys).
+  4. Implement #5 — needs no new data.
+  5. Documentation: A group, plus section D.
+  6. Defer #6 and #7 until there is a baseline to retune against.
+  7. Defer #4 until the suspension team delivers roll rates and roll-centre
+     heights.

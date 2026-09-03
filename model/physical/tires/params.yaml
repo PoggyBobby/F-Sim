@@ -1,0 +1,208 @@
+namespace: tires
+order: 80
+title: "TIRES — TTC ROUND 9 FIT (R20 compound, 2026-08-31); surrogate sizes, road µ = belt × 0.67 pending skidpad"
+
+about: >
+  WARNING: the 1ME295B report contains NO tire GRIP data. Its "tire stiffness"
+  (113 832 N/m) is the VERTICAL spring rate of the carcass — useless for grip.
+
+  FITTED 2026-08-31 from TTC ROUND 9 (program B2356, Calspan Jan 2022) via
+  tire_fit.py, RunData Matlab SI files in ttc/.
+
+  Our tire (Hoosier 18.0x7.5-10 R20, pattern FT28) was never TTC-tested, so
+  this is a POOLED SURROGATE FIT, same R20 compound:
+    lateral      43075 16x7.5-10 @8in (same width) + 43100 18.0x6.0-10 @7in
+                 (same OD) — 57,294 samples, RMS 87 N; the two tires
+                 individually agree within +/-6% on mu0, +/-1% on stiffness
+    longitudinal 43100 18.0x6.0-10 (both rims) — 25,807 samples
+
+  Fit conditions and VALIDITY: 12 psi (ASSUMED running pressure — confirm with
+  team), |camber| < 1 deg, loads 210-1150 N (covers our 430-620 N corners:
+  interpolation OK), slip angle sweeps +/-12 deg — the R20 PLATEAUS there, it
+  does not fall off; beyond +/-12 deg the model extrapolates a flat plateau.
+  No camber effects modeled (fit at ~0 deg).
+
+  Belt->asphalt: peak mu is scaled by mu_road_scale below; stiffnesses and
+  shapes carry over unscaled (standard practice).
+  Model: simplified Magic Formula + friction ellipse (separate mu_x).
+
+mu_road_scale:
+  label:  "Belt→road grip scale"
+  value:  0.67
+  unit:   "-"
+  symbol: "-"
+  status: PLACEHOLDER — skidpad measures this
+  what: >
+    Belt->asphalt grip scaling. Calspan's sandpaper belt grips harder than
+    track asphalt; common practice scales the fitted peak mu by ~0.65-0.70 for
+    on-road prediction (stiffnesses/shapes carry over unscaled).
+  need:   Steady-state skidpad lateral g
+  how:    Skidpad test vs sim prediction
+  why: >
+    Multiplies EVERY grip number — the single biggest absolute-accuracy lever
+    left. VALIDATE on skidpad; that measurement replaces this guess with truth.
+
+belt_mu_lat:
+  label:  "Belt peak µ, lateral"
+  value:  2.593
+  unit:   "-"
+  symbol: mu_belt_y
+  status: TTC FIT R9
+  what:   Peak LATERAL friction coefficient as fitted on the Calspan belt.
+  need:   "-"
+  how:    tire_fit.py on Round 9 cornering runs (surrogate spread +/-6%)
+  why:    Scaled by mu_road_scale to give the road value the sim uses.
+
+belt_mu_long:
+  label:  "Belt peak µ, longitudinal"
+  value:  2.359
+  unit:   "-"
+  symbol: mu_belt_x
+  status: TTC FIT R9
+  what:   Peak LONGITUDINAL friction coefficient as fitted on the belt.
+  need:   "-"
+  how:    tire_fit.py on Round 9 drive/brake runs
+  why:    Scaled by mu_road_scale to give the road value the sim uses.
+
+mu0:
+  label:  "Peak friction coefficient"
+  derived: tires.mu_road_scale * tires.belt_mu_lat
+  unit:   "-"
+  symbol: mu0
+  status: TTC FIT R9
+  what:   Peak grip per newton of load, at the nominal load (road value).
+  need:   Peak mu at several loads
+  how:    TTC data fit (if access ever appears) or skidpad testing
+  why: >
+    THE grip number. Max lateral g, spin thresholds, everything — the single
+    most important number in the sim.
+
+mu0_long:
+  label:  "Peak longitudinal friction"
+  derived: tires.mu_road_scale * tires.belt_mu_long
+  unit:   "-"
+  symbol: mu0x
+  status: TTC FIT R9
+  what: >
+    Drive/brake grip peak — fitted 9% below lateral; combined slip caps on the
+    friction ELLIPSE in tire.py.
+  need:   "-"
+  how:    tire_fit.py on Round 9 drive/brake runs
+  why:    Sets wheelspin threshold and traction capability.
+
+s_mu:
+  label:  "Load sensitivity"
+  value:  0.112
+  unit:   "-"
+  display_unit: —/100% load
+  symbol: s_mu
+  status: TTC FIT R9
+  what: >
+    Load sensitivity — how much the friction COEFFICIENT drops as vertical load
+    rises: mu = mu0 * (1 - s_mu*(Fz/Fz_nom - 1)). Shared by the lateral and
+    longitudinal peaks.
+  need:   mu at low vs high load
+  how:    Same TTC fit
+  why: >
+    The reason load transfer costs grip and torque placement matters at all.
+    Zero would make TV pointless.
+
+Fz_nom:
+  label:  "Nominal tire load"
+  derived: (mass.car_no_driver + mass.driver) * environment.g / 4.0
+  unit:   N
+  symbol: Fz_nom
+  status: DERIVED (follows the masses automatically)
+  what:   The "nominal" vertical load at which mu0 is defined (~one static corner weight).
+  need:   "-"
+  how:    = (m_car + m_driver)*g / 4
+  why:    Reference point for the load-sensitivity line.
+
+c_alpha_front:
+  label:  "Front cornering stiffness"
+  value:  37.0
+  unit:   1/rad
+  symbol: c_alpha_f
+  status: TTC FIT R9 (same tire all round)
+  what: >
+    Normalized cornering stiffness of a FRONT tire: lateral force per radian of
+    slip angle, per newton of load (C_alpha = this * Fz).
+  need:   Slope of Fy vs slip angle at small angles
+  how:    TTC cornering sweep
+  why: >
+    Front-axle responsiveness; with rear stiffness sets the understeer gradient
+    K_us the TV reference uses.
+
+c_alpha_rear:
+  label:  "Rear cornering stiffness"
+  value:  37.0
+  unit:   1/rad
+  symbol: c_alpha_r
+  status: TTC FIT R9 (same tire all round)
+  what:   Same, for a REAR tire.
+  need:   Same, rear
+  how:    TTC cornering sweep
+  why:    Rear grip slope — stability side of the understeer gradient.
+  note: >
+    Identical normalized stiffness front/rear makes the LINEAR understeer
+    gradient exactly zero (neutral) — balance now comes entirely from load
+    transfer, aero split and tire load sensitivity.
+
+c_kappa:
+  label:  "Longitudinal slip stiffness"
+  value:  41.9
+  unit:   1/slip
+  symbol: c_kappa
+  status: TTC FIT R9
+  what: >
+    Normalized longitudinal slip stiffness: drive/brake force per unit slip
+    ratio per newton (C_kappa = this * Fz).
+  need:   Slope of Fx vs slip ratio
+  how:    TTC drive/brake sweep
+  why:    Sets wheel-spin dynamics speed — the s-diff's plant. Gains retune if it moves.
+
+shape_c_lat:
+  label:  "Lateral shape factor"
+  value:  1.397
+  unit:   "-"
+  symbol: C_y
+  status: TTC FIT R9
+  what:   Magic Formula shape factor — how sharply lateral force peaks.
+  need:   Curve shape near/past the peak
+  how:    TTC fit
+  why: >
+    With E_y, sets where the curve peaks (currently 11.6 deg — real slicks
+    ~6-10 deg) and how it lets go.
+
+curv_e_lat:
+  label:  "Lateral curvature factor"
+  value:  0.365
+  unit:   "-"
+  symbol: E_y
+  status: TTC FIT R9
+  what:   Magic Formula curvature factor — fall-off past the lateral peak.
+  need:   Post-peak behavior
+  how:    TTC fit
+  why:    Gentle vs snappy breakaway — currently more forgiving than a real slick.
+
+shape_c_long:
+  label:  "Longitudinal shape factor"
+  value:  1.705
+  unit:   "-"
+  symbol: C_x
+  status: TTC FIT R9
+  what:   Same idea, drive/brake direction.
+  need:   Curve shape
+  how:    TTC fit
+  why:    Sets the peak slip ratio (~0.10) — also the replay's red-wheel spin threshold.
+
+curv_e_long:
+  label:  "Longitudinal curvature factor"
+  value:  0.389
+  unit:   "-"
+  symbol: E_x
+  status: TTC FIT R9
+  what:   Fall-off past the longitudinal peak.
+  need:   Post-peak behavior
+  how:    TTC fit
+  why:    How violently a spinning wheel loses force — feeds the wheelspin runaway.

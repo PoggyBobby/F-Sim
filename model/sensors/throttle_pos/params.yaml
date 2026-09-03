@@ -1,0 +1,18 @@
+namespace: sensors.throttle_pos
+order: 91
+title: "SENSORS — APPS, accelerator pedal position"
+
+about: >
+  APPS — accelerator pedal position sensor. The pedal map is linear:
+  APPS % -> torque request, 100% = full axle torque (2 x T_wheel_max).
+
+quant_pct:
+  label:  "APPS quantization"
+  value:  0.5
+  unit:   "%/LSB"
+  symbol: "-"
+  status: PLACEHOLDER — sensor spec
+  what:   Accelerator pedal position resolution.
+  need:   APPS sensor spec
+  how:    Datasheet
+  why:    Torque request granularity.

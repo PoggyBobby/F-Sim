@@ -1,0 +1,117 @@
+namespace: controllers
+order: 100
+title: "CONTROLLER GAINS — tuned in-sim; retune whenever vehicle/tire numbers move"
+
+about: >
+  Tuned controller gains — retuned 2026-08-29 against the report-based car
+  (heavier wheel inertia, 273 N*m wheel torque, I_z = 70). Whenever
+  vehicle/tire numbers change meaningfully, retune again: run the three
+  maneuvers, oscillation = too hot, sluggish tracking = too cold.
+
+  These are NOT car data. They are a design output of this sim.
+
+kp_sdiff:
+  label:  "s-diff proportional gain"
+  value:  15.0
+  unit:   N*m/(rad/s)
+  symbol: Kp
+  status: TUNED (sim)
+  what:   "Software differential: torque per rad/s of wheel-speed-difference error."
+  need:   "-"
+  how:    "Re-tune in sim: oscillation = too hot, sluggish = too cold"
+  why:    How hard the s-diff fights wheel-speed error.
+
+ki_sdiff:
+  label:  "s-diff integral gain"
+  value:  60.0
+  unit:   N*m/rad
+  symbol: Ki
+  status: TUNED (sim)
+  what:   "Software differential: torque per accumulated rad of error."
+  need:   "-"
+  how:    Same
+  why:    Removes steady error (e.g. constant-radius corners).
+
+i_sdiff_max:
+  label:  "s-diff integral clamp"
+  value:  60.0
+  unit:   N*m
+  symbol: "-"
+  status: TUNED (sim)
+  what:   Anti-windup limit on the s-diff integral term.
+  need:   "-"
+  how:    Same
+  why:    Stops the integral charging up during saturation and overshooting after.
+
+dt_sdiff_max:
+  label:  "s-diff torque-split clamp"
+  value:  80.0
+  unit:   N*m
+  symbol: dT_max
+  status: TUNED (sim) — SAFETY-CRITICAL
+  what:   Hard cap on how much torque the s-diff may transfer between the wheels.
+  need:   "-"
+  how:    Sized in sim against the spin scenario
+  why: >
+    Without it, an unbounded speed-difference PI dumps torque onto the loaded
+    outer tire near the limit, burns its lateral grip (friction circle), and
+    power-oversteers the car — the sim demonstrates exactly this if you raise
+    the cap. The s-diff's job is trimming wheel speeds, not large torque moves.
+
+kp_tv:
+  label:  "TV proportional gain"
+  value:  2500.0
+  unit:   N*m/(rad/s)
+  symbol: Kp
+  status: TUNED (sim)
+  what:   "Torque vectoring: yaw moment per rad/s of yaw-rate error."
+  need:   "-"
+  how:    Re-tune in sim
+  why:    How hard TV chases the yaw reference.
+
+ki_tv:
+  label:  "TV integral gain"
+  value:  1000.0
+  unit:   N*m/rad
+  symbol: Ki
+  status: TUNED (sim)
+  what:   "Torque vectoring: yaw moment per accumulated rad of error."
+  need:   "-"
+  how:    Same
+  why:    Steady-state yaw accuracy in long corners.
+
+i_tv_max:
+  label:  "TV integral clamp"
+  value:  200.0
+  unit:   N*m
+  symbol: "-"
+  status: TUNED (sim)
+  what:   Anti-windup limit on the TV integral.
+  need:   "-"
+  how:    Same
+  why:    Bounds windup when the reference is unreachable (e.g. full lock at speed).
+
+mz_max:
+  label:  "Yaw-moment clamp"
+  value:  600.0
+  unit:   N*m
+  symbol: Mz_max
+  status: TUNED (sim)
+  what:   Clamp on total commanded yaw moment.
+  need:   "-"
+  how:    Same
+  why:    Keeps TV authority bounded.
+
+ay_frac:
+  label:  "Reference aggressiveness"
+  value:  0.95
+  unit:   "-"
+  display_unit: 0-1
+  symbol: "-"
+  status: TUNED (sim)
+  what: >
+    The yaw-rate reference is capped at this fraction of the friction-limited
+    lateral acceleration.
+  need:   "-"
+  how:    Same
+  why:    0.95 = ask for 95% of what grip allows — margin against an optimistic reference.

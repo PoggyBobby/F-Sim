@@ -3,3 +3,6 @@
 	url = https://github.com/spartanracingelectric/SRE-VCU.git
 	branch = custom-inverters
 	shallow = true
+[submodule "reference/VehicleSim"]
+	path = reference/VehicleSim
+	url = git@github.com:spartanracingelectric/VehicleSim.git

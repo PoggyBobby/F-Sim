@@ -4,7 +4,7 @@ run before it.
 WHY: results from this sim get quoted in design reviews. A number is only
 worth quoting if you can say which car it came from. So every run writes its
 own folder containing the FULL parameter set it ran on (each value with its
-provenance tag straight out of car_data.py), the raw time-series data, the
+provenance tag straight out of its params.yaml), the raw time-series data, the
 summary metrics, and an explicit statement of WHAT CHANGED and WHAT STAYED
 THE SAME versus the previous run.
 
@@ -39,75 +39,63 @@ from datetime import datetime
 
 import numpy as np
 
-import car_data as cd
+from model.config import cfg
 
 RUNS_DIR = "runs"
 
-# car_data.py entries that are unit conversions / physical constants, not car
-# data — excluded so a parameter diff only ever shows real vehicle changes.
-NOT_CAR_DATA = {"LB", "INCH", "FT", "LBFT", "MPH", "HP", "DEG", "RPM", "G",
-                "RHO_AIR"}
+# Manifest schema version. Bumped to 2 when the parameters moved out of
+# car_data.py into the per-component params.yaml files: parameter keys are now
+# dotted config paths (`tires.mu0`) instead of module constants (`TIRE_MU0`),
+# so a v1 manifest's parameter block cannot be diffed against a v2 one.
+SCHEMA = 2
 
-# provenance tags, in the order they are searched for in a trailing comment
-TAGS = ("FROM REPORT", "CURRENT CAR", "RULES VALUE", "PLACEHOLDER", "SUSPECT",
-        "MEASURED", "TTC FIT", "DERIVED", "TUNED", "NUMERICAL GUARD")
+# Parameters excluded from the diff: physical constants that cannot change.
+# (The unit conversions that used to be excluded here no longer exist as
+# parameters — model/config.py applies them during loading.)
+EXCLUDED_TAGS = {"CONSTANT"}
 
-# car_data.py is the DATA file: an edit to it shows up in the parameter diff,
-# so it must not also be reported as a code change (that warning is about the
-# model itself moving under the numbers).
-DATA_FILE = "car_data.py"
+# The params.yaml files are the DATA files: an edit to one shows up in the
+# parameter diff, so it must not ALSO be reported as a code change (that
+# warning is about the model itself moving under the numbers).
+DATA_FILES = tuple(sorted(cfg.sections().values()))
 
-CODE_FILES = ("car_data.py", "params.py", "tire.py", "vehicle.py",
-              "controllers.py", "maneuvers.py", "sim.py", "run_sim.py",
-              "runlog.py", "animate.py", "style.py", "verify.py",
-              "sensors.py", "tire_fit.py")
-
-_NAME_RE = re.compile(r"^([A-Z][A-Z0-9_]*)\s*=\s*(.*)$")
+CODE_FILES = ("model/config.py", "model/params.py", "model/sim.py",
+              "model/physical/vehicle.py", "model/physical/tires/tire.py",
+              "model/sensors/suite.py", "model/sensors/driver.py",
+              "model/sensors/readings.py", "model/sensors/quantize.py",
+              "model/sensors/imu_6axis/imu.py",
+              "model/sensors/wheel_speed/wss.py",
+              "model/sensors/steering_angle/sas.py",
+              "model/sensors/throttle_pos/apps.py",
+              "model/sensors/brake_pressure_sens/bps.py",
+              "model/maneuvers/maneuvers.py", "model/maneuvers/tracks.py",
+              "controllers/python/torque_split.py",
+              "run_sim.py", "runlog.py", "animate.py", "style.py",
+              "verify.py", "tire_fit.py") + DATA_FILES
 
 
 # ───────────────────────────────────────────────────────── parameter snapshot
-def _trailing_comments(path="car_data.py"):
-    """name -> trailing comment on its assignment line in car_data.py.
-
-    That comment is where the provenance tag lives (`# FROM REPORT (m_t)`),
-    so the recorded snapshot carries not just the number but where it came
-    from — which is the whole point of tagging them in the first place.
-    """
-    out = {}
-    if not os.path.exists(path):
-        return out
-    with open(path, encoding="utf-8") as fh:
-        for line in fh:
-            m = _NAME_RE.match(line.rstrip("\n"))
-            if not m:
-                continue
-            rhs = m.group(2)
-            comment = rhs.split("#", 1)[1].strip() if "#" in rhs else ""
-            out[m.group(1)] = comment
-    return out
-
-
-def _tag_of(comment):
-    up = comment.upper()
-    for tag in TAGS:
-        if tag in up:
-            return tag
-    return "UNTAGGED"
-
-
 def param_snapshot():
-    """Every car-data number the sim can see, with its value and provenance."""
-    comments = _trailing_comments()
+    """Every car-data number the sim can see, with its value and provenance.
+
+    Keys are the dotted config paths (`tires.mu0`, `sensors.imu_6axis.lpf_hz`),
+    so a name in a run manifest is the same string you grep for in the code and
+    in the params.yaml files.
+
+    Provenance comes from each entry's `status:` field rather than from a
+    trailing source comment, which is the whole reason the YAML entries carry
+    one: the tag is data now, not something scraped back out of a comment.
+    """
     snap = {}
-    for name in dir(cd):
-        if name in NOT_CAR_DATA or not re.fullmatch(r"[A-Z][A-Z0-9_]*", name):
+    for path, entry in cfg.params().items():
+        tag = cfg.tag_of(path)
+        if tag in EXCLUDED_TAGS:
             continue
-        val = getattr(cd, name)
+        val = entry["si"]
         if not isinstance(val, (int, float)) or isinstance(val, bool):
             continue
-        comment = comments.get(name, "")
-        snap[name] = {"value": float(val), "tag": _tag_of(comment),
-                      "note": comment}
+        snap[path] = {"value": float(val), "tag": tag,
+                      "note": str(entry.get("status", "")).strip()}
     return snap
 
 
@@ -117,6 +105,12 @@ def _sha(path):
 
 
 def code_snapshot():
+    """SHA of every file that can change what the sim computes.
+
+    Includes the params.yaml files: they are data, but an edit to one is still
+    something a later run needs to know about. DATA_FILES separates them out
+    again when the "the code moved under the numbers" warning is written.
+    """
     return {f: _sha(f) for f in CODE_FILES if os.path.exists(f)}
 
 
@@ -150,8 +144,20 @@ def diff_maneuvers(prev, cur):
 
 
 # ─────────────────────────────────────────────────────────────────── diffing
-def diff_params(prev, cur):
-    """CHANGED / ADDED / REMOVED / UNCHANGED between two parameter snapshots."""
+def diff_params(prev, cur, comparable=True):
+    """CHANGED / ADDED / REMOVED / UNCHANGED between two parameter snapshots.
+
+    `comparable=False` (a previous run recorded under an older manifest schema)
+    returns an explicitly incomparable diff. The alternative — diffing dotted
+    paths against the old module constants — would report every parameter as
+    removed and re-added, which reads like a catastrophic change and is really
+    just a rename.
+    """
+    if not comparable:
+        return {"changed": {}, "added": {}, "removed": {}, "unchanged": {},
+                "incomparable": "previous run used an older manifest schema "
+                                "(parameters were named as car_data.py "
+                                "constants); parameter diff skipped"}
     changed, added, removed, unchanged = {}, {}, {}, {}
     for name, entry in cur.items():
         if name not in prev:
@@ -233,8 +239,10 @@ class RunRecorder:
 
         prev = self._load_previous()
         self.prev_id = prev["run_id"] if prev else None
+        same_schema = bool(prev) and prev.get("schema", 1) == SCHEMA
         self.param_diff = diff_params(prev["parameters"] if prev else {},
-                                      self.params)
+                                      self.params,
+                                      comparable=(not prev) or same_schema)
         self.code_diff = diff_code(prev["code_sha256"] if prev else {}, self.code)
         self.man_diff = diff_maneuvers(prev.get("maneuvers", {}) if prev else {},
                                        self.maneuvers)
@@ -318,6 +326,7 @@ class RunRecorder:
     # -- writers ----------------------------------------------------------
     def _write_manifest(self):
         manifest = {
+            "schema": SCHEMA,
             "run_id": self.run_id,
             "run_number": self.run_number,
             "label": self.label,
@@ -355,7 +364,13 @@ class RunRecorder:
 
         L.append("## CHANGED parameters")
         L.append("")
-        if d["changed"]:
+        if d.get("incomparable"):
+            L.append(f"_Not comparable — {d['incomparable']}._")
+            L.append("")
+            L.append("The parameters themselves are listed in `PARAMETERS.md`. "
+                     "From the next run on, diffs work normally again.")
+            L.append("")
+        elif d["changed"]:
             L.append("| parameter | was | now | provenance |")
             L.append("|---|---|---|---|")
             for n in sorted(d["changed"]):
@@ -389,17 +404,19 @@ class RunRecorder:
                          f"**{e['tag']}**")
             L.append("")
 
-        L.append("## UNCHANGED parameters")
-        L.append("")
-        L.append(f"{len(d['unchanged'])} parameters are byte-identical to run "
-                 f"{self.prev_id or '(n/a)'}, grouped by provenance:")
-        L.append("")
-        by_tag = {}
-        for n, e in sorted(d["unchanged"].items()):
-            by_tag.setdefault(e["tag"], []).append(f"`{n}`={e['value']:g}")
-        for tag in sorted(by_tag):
-            L.append(f"- **{tag}** ({len(by_tag[tag])}): " + ", ".join(by_tag[tag]))
-        L.append("")
+        if not d.get("incomparable"):
+            L.append("## UNCHANGED parameters")
+            L.append("")
+            L.append(f"{len(d['unchanged'])} parameters are byte-identical to "
+                     f"run {self.prev_id or '(n/a)'}, grouped by provenance:")
+            L.append("")
+            by_tag = {}
+            for n, e in sorted(d["unchanged"].items()):
+                by_tag.setdefault(e["tag"], []).append(f"`{n}`={e['value']:g}")
+            for tag in sorted(by_tag):
+                L.append(f"- **{tag}** ({len(by_tag[tag])}): "
+                         + ", ".join(by_tag[tag]))
+            L.append("")
 
         md = self.man_diff
         L.append("## Maneuver test values (scenario settings, not car data)")
@@ -431,7 +448,7 @@ class RunRecorder:
 
         L.append("## Code")
         L.append("")
-        changed_code = [f for f in cdf["changed"] if f != DATA_FILE]
+        changed_code = [f for f in cdf["changed"] if f not in DATA_FILES]
         if changed_code or cdf["added"] or cdf["removed"]:
             for f in changed_code:
                 L.append(f"- edited: `{f}`")
@@ -444,19 +461,21 @@ class RunRecorder:
                      "data — a metric difference versus the previous run is "
                      "not necessarily a vehicle difference.")
         else:
+            edited_data = [f for f in cdf["changed"] if f in DATA_FILES]
             L.append("_Unchanged — same model source, byte for byte."
-                     + (" (`car_data.py` was edited; those edits are the "
-                        "parameter changes listed above.)"
-                        if DATA_FILE in cdf["changed"] else "") + "_")
+                     + (" (" + ", ".join(f"`{f}`" for f in edited_data)
+                        + " was edited; those edits are the parameter changes "
+                          "listed above.)"
+                        if edited_data else "") + "_")
         L.append("")
         self._write("CHANGES.md", L)
 
     def _write_parameters(self):
         d = self.param_diff
         L = [f"# Parameters used by run {self.run_id}", ""]
-        L.append("Every number the sim ran on, straight out of `car_data.py`, "
-                 "with its provenance tag and whether it moved since run "
-                 f"{self.prev_id or '(n/a)'}.")
+        L.append("Every number the sim ran on, straight out of the "
+                 "`params.yaml` files, with its provenance tag and whether it "
+                 f"moved since run {self.prev_id or '(n/a)'}.")
         L.append("")
         L.append("| parameter | value | provenance | vs. previous run |")
         L.append("|---|---|---|---|")
@@ -472,7 +491,7 @@ class RunRecorder:
                 status = "same"
             L.append(f"| `{n}` | {e['value']:g} | {e['tag']} | {status} |")
         L.append("")
-        L.append("Provenance tags are defined at the top of `car_data.py`. "
+        L.append("Provenance tags are the `status:` field of each entry in the `params.yaml` files. "
                  "`PLACEHOLDER` means no source at all yet — results that "
                  "depend on those are provisional, and the tire block is "
                  "entirely placeholder.")
@@ -503,13 +522,10 @@ class RunRecorder:
         L.append(f"- **previous run:** `{self.prev_id or '— none'}`")
         if self.note:
             L.append(f"- **note:** {self.note}")
-        m_tot = (self.params["CAR_MASS_NO_DRIVER"]["value"]
-                 + self.params["DRIVER_MASS"]["value"]
-                 if "CAR_MASS_NO_DRIVER" in self.params else float("nan"))
-        L.append(f"- **car:** {m_tot:.1f} kg total (car+driver), "
-                 f"{self.params['WHEELBASE']['value']:.2f} m wheelbase, "
-                 f"tire µ₀ {self.params['TIRE_MU0']['value']:.2f} "
-                 f"({self.params['TIRE_MU0']['tag']})")
+        L.append(f"- **car:** {cfg.mass.total:.1f} kg total (car+driver), "
+                 f"{cfg.geometry.wheelbase:.2f} m wheelbase, "
+                 f"tire µ₀ {cfg.tires.mu0:.2f} "
+                 f"({cfg.tag_of('tires.mu0')})")
         n_ph = sum(1 for e in self.params.values() if e["tag"] == "PLACEHOLDER")
         L.append(f"- **provenance:** {n_ph} of {len(self.params)} parameters are "
                  f"still PLACEHOLDER (see `PARAMETERS.md`)")
