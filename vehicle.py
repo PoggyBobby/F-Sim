@@ -84,9 +84,6 @@ class VehicleModel:
         # front/rear pairing — used for split-µ tests (tracks.py)
         self.tires = (tuple(tires) if tires is not None
                       else (tire_front, tire_front, tire_rear, tire_rear))
-                 tire_rear: MagicFormulaTire):
-        self.p = p
-        self.tires = (tire_front, tire_front, tire_rear, tire_rear)
         # wheel positions relative to CG, ISO frame (x fwd, y left): FL FR RL RR
         self.wheel_xy = (
             ( p.a,  p.track_f / 2.0),
