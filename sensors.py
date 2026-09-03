@@ -23,11 +23,24 @@ Two layers live here:
       controller config sees identical noise (fair comparison).
 
 What the VCU must ESTIMATE (and the real one will too):
-  vx — there is no vehicle-speed sensor. Estimated from rear wheel speeds:
-      min(ωL,ωR)·r_w while driving (a spinning wheel reads too fast, so
-      take the slower one), max(...) while braking (a locking wheel reads
-      too slow). Both rears spinning together still fools it — that is a
-      REAL limitation the real car inherits, not a sim bug.
+  vx — there is no vehicle-speed sensor. Wheel-based, YAW-CORRECTED
+      estimate: each rear wheel is first referred to
+         the CG with the gyro (v_from_RL = ω_RL·r_w + r·t/2, v_from_RR =
+         ω_RR·r_w − r·t/2 — the inner wheel genuinely runs slower in a
+         corner, and without this the pick below reads ~r·t/2 low in
+         every turn), then min(...) while driving (a spinning wheel reads
+         too fast, so take the slower one), max(...) while braking (a
+         locking wheel reads too slow) — `vx_wheel_est` (= `vx_est` here).
+      Measured on the corner-exit runs (before any spin): wheel-only
+      0.4–0.7 m/s rms error, yaw-corrected 0.14. Both rears spinning
+      together still fools it — the IMU fusion comes next.
+  per-wheel ground speed and slip ratio — each rear contact patch moves at
+      vx ∓ r·track/2 (left wheel slower in a left turn). Combined with the
+      wheel speed that gives a per-wheel slip-ratio ESTIMATE
+      (`kappa_est_RL/RR`) — the input a per-wheel slip limiter needs.
+  dw_geo — the rear wheel-speed difference steering geometry explains,
+      v·t·tan(δ)/(L·r_w): what an LSD-style law must subtract from the
+      measured difference before acting (zero when the wheel is straight).
 """
 
 import math
@@ -87,7 +100,13 @@ class SensorReadings:
     wheel_speed_RL: float = 0.0      # rad/s at the wheel (÷ gear ratio)
     wheel_speed_RR: float = 0.0
     vx_est: float = 0.0              # estimated ground speed [m/s]
+    vx_wheel_est: float = 0.0        # wheel-only ground speed estimate [m/s]
     steer_est: float = 0.0           # estimated road-wheel angle [rad]
+    v_ground_RL: float = 0.0         # est. ground speed under each rear
+    v_ground_RR: float = 0.0         #   contact patch [m/s] (vx ∓ r·t/2)
+    kappa_est_RL: float = 0.0        # est. slip ratio per rear wheel [-]
+    kappa_est_RR: float = 0.0
+    dw_geo: float = 0.0              # Δω (RR−RL) steering geometry explains
 
 
 class DriverAdapter:
@@ -115,6 +134,15 @@ def _quant(v, step):
     return step * round(v / step) if step > 0 else v
 
 
+def expected_dw(vx: float, delta: float, vp: VehicleParams) -> float:
+    """Rear wheel-speed difference (ω_RR − ω_RL) that steering geometry
+    alone produces: kinematic 1/R = tan(δ)/L, each rear contact patch runs
+    at v·(1 ± t/(2R)), so Δω = v·t·tan(δ)/(L·r_w). Positive = right wheel
+    faster = left turn. Exactly 0 with the wheel straight — no divide by
+    zero, no 'are we turning' flag."""
+    return vx * vp.track_r * math.tan(delta) / (vp.wheelbase * vp.r_wheel)
+
+
 class SensorSuite:
     """Samples truth → SensorReadings, at the VCU rate."""
 
@@ -123,6 +151,7 @@ class SensorSuite:
         self.noise = noise
         self.rng = np.random.default_rng(cd.SENSOR_SEED if seed is None else seed)
         self.gyro_bias = cd.IMU_GYRO_BIAS if noise else 0.0
+        self.accel_bias = cd.IMU_ACCEL_BIAS if noise else 0.0
         self._gyro_lpf = None
 
     def measure(self, s, driver: DriverInputs, info, dt_vcu: float,
@@ -154,14 +183,33 @@ class SensorSuite:
         alpha = dt_vcu / (dt_vcu + 1.0 / (2.0 * math.pi * cd.IMU_LPF_HZ))
         self._gyro_lpf += alpha * (gyro - self._gyro_lpf)
         r.yaw_rate = self._gyro_lpf
-        r.ax = info["ax"] + n(cd.IMU_ACCEL_NOISE_STD)
+        r.ax = info["ax"] + self.accel_bias + n(cd.IMU_ACCEL_NOISE_STD)
         r.ay = info["ay"] + n(cd.IMU_ACCEL_NOISE_STD)
 
-        # VCU estimates: road-wheel angle via the map; vx from wheel speeds
+        # ── VCU estimates (computed from the readings above) ──────────
+        # road-wheel angle via the steering map
         r.steer_est = math.radians(steer_map_deg(r.handwheel_deg))
+
+        # ground speed: yaw-corrected wheel pick
         wl, wr = r.wheel_speed_RL, r.wheel_speed_RR
-        w_pick = max(wl, wr) if braking else min(wl, wr)
-        r.vx_est = max(w_pick * vp.r_wheel, 0.0)
+        half_t = 0.5 * vp.track_r
+        v_from_L = wl * vp.r_wheel + r.yaw_rate * half_t   # y = +t/2
+        v_from_R = wr * vp.r_wheel - r.yaw_rate * half_t   # y = −t/2
+        v_pick = max(v_from_L, v_from_R) if braking else min(v_from_L, v_from_R)
+        r.vx_wheel_est = max(v_pick, 0.0)
+        r.vx_est = r.vx_wheel_est
+
+        # per-wheel ground speed and slip ratio (left wheel at y = +t/2
+        # moves at vx − r·t/2; the only place the turn enters)
+        r.v_ground_RL = r.vx_est - r.yaw_rate * half_t
+        r.v_ground_RR = r.vx_est + r.yaw_rate * half_t
+        r.kappa_est_RL = ((wl * vp.r_wheel - r.v_ground_RL)
+                          / max(abs(r.v_ground_RL), vp.v_eps))
+        r.kappa_est_RR = ((wr * vp.r_wheel - r.v_ground_RR)
+                          / max(abs(r.v_ground_RR), vp.v_eps))
+
+        # the speed difference steering explains (LSD geometry correction)
+        r.dw_geo = expected_dw(r.vx_est, r.steer_est, vp)
         return r
 
     def reset(self):
