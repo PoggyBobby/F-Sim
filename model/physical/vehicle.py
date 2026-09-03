@@ -33,8 +33,8 @@ slip ratio and slip angle.
 """
 
 import math
-from params import VehicleParams, G, RHO_AIR
-from tire import MagicFormulaTire
+from model.params import VehicleParams, G, RHO_AIR
+from model.physical.tires.tire import MagicFormulaTire
 
 # state vector indices
 IX, IY, IPSI, IVX, IVY, IR, IWRL, IWRR = range(8)

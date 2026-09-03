@@ -29,7 +29,7 @@ block for provenance and the belt→asphalt scaling.
 """
 
 import math
-from params import TireParams
+from model.params import TireParams
 
 
 class MagicFormulaTire:

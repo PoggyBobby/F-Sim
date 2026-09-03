@@ -262,7 +262,13 @@ def _to_si(value, unit, where):
             f"{where}: unknown unit '{unit}'. Known units: "
             f"{', '.join(sorted(UNITS))}"
         )
-    return value * UNITS[unit]
+    factor = UNITS[unit]
+    # An integer that needs no conversion stays an integer. Counts, seeds and
+    # sample sizes are used where a float is wrong (numpy's default_rng rejects
+    # a float seed), so don't silently widen them.
+    if factor == 1.0 and isinstance(value, int) and not isinstance(value, bool):
+        return value
+    return value * factor
 
 
 def _check_entry(entry, where):

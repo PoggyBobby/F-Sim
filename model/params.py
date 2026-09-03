@@ -1,8 +1,16 @@
 """Parameter containers and derived quantities.
 
-⚠️  THE NUMBERS DO NOT LIVE HERE. Every value is pulled from car_data.py —
-the master data file — which documents what each quantity means, its units,
-and how to measure it. To change anything about the car, edit car_data.py.
+⚠️  THE NUMBERS DO NOT LIVE HERE. Every value is pulled from the per-component
+`params.yaml` files through `model/config.py`, which documents what each
+quantity means, its units, and how to measure it. To change anything about the
+car, edit the YAML file next to the component:
+
+    model/physical/mass/params.yaml        car and driver mass
+    model/physical/geometry/params.yaml    wheelbase, track, CG, yaw inertia
+    model/physical/drivetrain/params.yaml  wheels, gearing, motors, limits
+    model/physical/aero/params.yaml        C_L, C_D, area, balance
+    model/physical/tires/params.yaml       Magic Formula coefficients
+    controllers/python/params.yaml         the tuned gains
 
 This file only defines:
   * the dataclass containers the rest of the code passes around,
@@ -15,55 +23,59 @@ Conventions (ISO 8855):
     Wheel order everywhere in the code: [FL, FR, RL, RR].
     Left-side wheels sit at y = +track/2, right-side at y = -track/2.
 
-Drive layout (team-confirmed 2026-08-30): four motors fitted, one per
-wheel; the two REAR ones are active in the current build, 4WD is the goal.
-The same controller math applies per axle — extension noted in README.md.
+Drive layout (team-confirmed 2026-08-30): four motors fitted, one per wheel;
+the two REAR ones are active in the current build, 4WD is the goal. The same
+controller math applies per axle — extension noted in README.md.
 """
 
 from dataclasses import dataclass
 
-import car_data as cd
-from car_data import G, RHO_AIR   # re-exported; the sim imports these from here
+from model.config import cfg
+from model.config import G, RHO_AIR   # re-exported; the sim imports these here
+
+__all__ = ["VehicleParams", "TireParams", "ControlParams", "default_setup",
+           "G", "RHO_AIR"]
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# Vehicle (chassis + powertrain) — values documented in car_data.py
+# Vehicle (chassis + powertrain) — values documented in model/physical/*.yaml
 # ─────────────────────────────────────────────────────────────────────────
 @dataclass
 class VehicleParams:
     # mass & geometry
-    m_car: float = cd.CAR_MASS_NO_DRIVER
-    m_driver: float = cd.DRIVER_MASS
-    wheelbase: float = cd.WHEELBASE
-    track_f: float = cd.TRACK_FRONT
-    track_r: float = cd.TRACK_REAR
-    weight_frac_front: float = cd.WEIGHT_FRACTION_FRONT
-    h_cg: float = cd.H_CG
-    I_z: float = cd.I_Z
+    m_car: float = cfg.mass.car_no_driver
+    m_driver: float = cfg.mass.driver
+    wheelbase: float = cfg.geometry.wheelbase
+    track_f: float = cfg.geometry.track_front
+    track_r: float = cfg.geometry.track_rear
+    weight_frac_front: float = cfg.geometry.weight_fraction_front
+    h_cg: float = cfg.geometry.h_cg
+    I_z: float = cfg.geometry.I_z
     # wheels / drivetrain
-    r_wheel: float = cd.WHEEL_RADIUS
-    I_wheel: float = cd.I_WHEEL
-    gear_ratio: float = cd.GEAR_RATIO
-    motor_T_peak: float = cd.MOTOR_TORQUE_PEAK
-    motor_P_peak: float = cd.MOTOR_POWER_PEAK
-    P_total_max: float = cd.POWER_CAP_TOTAL
-    regen_speed_cutoff: float = cd.REGEN_SPEED_CUTOFF
+    r_wheel: float = cfg.drivetrain.wheel_radius
+    I_wheel: float = cfg.drivetrain.I_wheel
+    gear_ratio: float = cfg.drivetrain.gear_ratio
+    motor_T_peak: float = cfg.drivetrain.motor_torque_peak
+    motor_P_peak: float = cfg.drivetrain.motor_power_peak
+    P_total_max: float = cfg.drivetrain.power_cap_total
+    regen_speed_cutoff: float = cfg.drivetrain.regen_speed_cutoff
     # aero
-    ClA: float = cd.CLA
-    CdA: float = cd.CDA
-    aero_balance_front: float = cd.AERO_BALANCE_FRONT
+    ClA: float = cfg.aero.ClA
+    CdA: float = cfg.aero.CdA
+    aero_balance_front: float = cfg.aero.balance_front
     # steering geometry
-    ackermann_frac: float = cd.ACKERMANN_FRACTION
+    ackermann_frac: float = cfg.steering.ackermann_fraction
     # load transfer
-    lat_transfer_frac_front: float = cd.LAT_TRANSFER_FRAC_FRONT
+    lat_transfer_frac_front: float = cfg.loads.lat_transfer_frac_front
     # numerical guard
-    v_eps: float = cd.V_EPS
+    v_eps: float = cfg.numerical.v_eps
 
     # ---- derived quantities (computed, never entered) ----------------------
     @property
     def m_total(self) -> float:
-        """Total mass WITH driver = car + driver (see the MASS box in
-        car_data.py — never enter a with-driver total directly)."""
+        """Total mass WITH driver = car + driver (see the `about:` box in
+        model/physical/mass/params.yaml — never enter a with-driver total
+        directly)."""
         return self.m_car + self.m_driver
 
     @property
@@ -84,44 +96,44 @@ class VehicleParams:
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# Tire (simplified Magic Formula) — values documented in car_data.py
+# Tire (simplified Magic Formula) — model/physical/tires/params.yaml
 # ─────────────────────────────────────────────────────────────────────────
 @dataclass
 class TireParams:
-    mu0: float = cd.TIRE_MU0
-    mu0x: float = cd.TIRE_MU0_LONG
-    s_mu: float = cd.TIRE_S_MU
-    Fz_nom: float = cd.TIRE_FZ_NOM
-    c_alpha: float = cd.TIRE_C_ALPHA_REAR   # per-axle value set in default_setup()
-    C_y: float = cd.TIRE_SHAPE_C_LAT
-    E_y: float = cd.TIRE_CURV_E_LAT
-    c_kappa: float = cd.TIRE_C_KAPPA
-    C_x: float = cd.TIRE_SHAPE_C_LONG
-    E_x: float = cd.TIRE_CURV_E_LONG
+    mu0: float = cfg.tires.mu0
+    mu0x: float = cfg.tires.mu0_long
+    s_mu: float = cfg.tires.s_mu
+    Fz_nom: float = cfg.tires.Fz_nom
+    c_alpha: float = cfg.tires.c_alpha_rear   # per-axle value set in default_setup()
+    C_y: float = cfg.tires.shape_c_lat
+    E_y: float = cfg.tires.curv_e_lat
+    c_kappa: float = cfg.tires.c_kappa
+    C_x: float = cfg.tires.shape_c_long
+    E_x: float = cfg.tires.curv_e_long
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# Controller gains — values documented in car_data.py; retune on real data
+# Controller gains — controllers/python/params.yaml; retune on real data
 # ─────────────────────────────────────────────────────────────────────────
 @dataclass
 class ControlParams:
-    kp_sdiff: float = cd.KP_SDIFF
-    ki_sdiff: float = cd.KI_SDIFF
-    i_sdiff_max: float = cd.I_SDIFF_MAX
-    dT_sdiff_max: float = cd.DT_SDIFF_MAX
-    kp_tv: float = cd.KP_TV
-    ki_tv: float = cd.KI_TV
-    i_tv_max: float = cd.I_TV_MAX
-    Mz_max: float = cd.MZ_MAX
-    ay_frac: float = cd.AY_FRAC
+    kp_sdiff: float = cfg.controllers.kp_sdiff
+    ki_sdiff: float = cfg.controllers.ki_sdiff
+    i_sdiff_max: float = cfg.controllers.i_sdiff_max
+    dT_sdiff_max: float = cfg.controllers.dt_sdiff_max
+    kp_tv: float = cfg.controllers.kp_tv
+    ki_tv: float = cfg.controllers.ki_tv
+    i_tv_max: float = cfg.controllers.i_tv_max
+    Mz_max: float = cfg.controllers.mz_max
+    ay_frac: float = cfg.controllers.ay_frac
 
 
 def default_setup():
-    """The standard parameter set, built entirely from car_data.py.
+    """The standard parameter set, built entirely from the params.yaml files.
 
     Returns (vehicle, tire_front, tire_rear, control)."""
     vehicle = VehicleParams()
-    tire_front = TireParams(c_alpha=cd.TIRE_C_ALPHA_FRONT)
-    tire_rear = TireParams(c_alpha=cd.TIRE_C_ALPHA_REAR)
+    tire_front = TireParams(c_alpha=cfg.tires.c_alpha_front)
+    tire_rear = TireParams(c_alpha=cfg.tires.c_alpha_rear)
     control = ControlParams()
     return vehicle, tire_front, tire_rear, control

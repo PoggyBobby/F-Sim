@@ -8,8 +8,8 @@ Live checklist. Delete this file before the PR.
       + package `__init__.py`. *committed `40942f9`*
 - [x] **3. `model/config.py`** — YAML loader: units, derived formulas, `cfg`, `cfg.meta()`
 - [x] **4. YAML params** — 13 files, ~68 entries, each with value/unit/symbol/status/what/need/how/why
-- [ ] **5. `model/params.py`** — dataclasses built from `cfg`
-- [ ] **6. Split `sensors.py`** — readings / driver / suite + 5 per-sensor modules
+- [x] **5. `model/params.py`** — dataclasses built from `cfg`
+- [x] **6. Split `sensors.py`** — readings / driver / suite + 5 per-sensor modules
 - [ ] **7. Imports** — absolute package paths across the tree
 - [ ] **8. `runlog.py`** — `cfg.meta()` instead of comment-scraping; repoint `CODE_FILES`
 - [ ] **9. `param_sheet.py`** — generate from YAML; output to `docs/datasheets/`
