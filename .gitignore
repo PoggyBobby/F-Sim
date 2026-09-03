@@ -12,3 +12,6 @@ plots/
 # Tire Test Consortium data is restricted to member teams by the TTC
 # agreement. Keep it on local disks only. (Also 368 MB / >100 MB files.)
 ttc/
+
+# software-in-the-loop host build of the VCU firmware (sil/Makefile)
+sil/build/
