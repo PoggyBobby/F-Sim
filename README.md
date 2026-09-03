@@ -269,6 +269,40 @@ moment, converted to a split by `ΔT = 2·Mz·r_wheel/track_r`.
   scope here) — and it's why s-diff/TV must eventually be integrated with a
   slip limiter on the real car.
 
+## Track tests — the corner matrix (`tracks.py`)
+
+The ranking test matrix from the s-diff plan: **30°, 45°, 90°, 120° and
+U-turn (180°)** corners at 2–3 radii each, plus one **split-µ** case (the
+90° corner with the inner rear on a µ × 0.6 patch). Entry is at 90% of
+√(µgR), the throttle **steps to full at the apex**, and the wheel unwinds
+once the car's heading has swept the corner angle.
+
+```bash
+.venv/bin/python run_sim.py --maneuver tracks                    # all 13 tests
+.venv/bin/python run_sim.py --maneuver tracks --track u_turn 90deg
+.venv/bin/python run_sim.py --maneuver tracks --track-throttle 55  # apex step, % of peak
+.venv/bin/python run_sim.py --maneuver tracks --track-radius 8 --track-entry-frac 0.8
+.venv/bin/python run_sim.py --maneuver tracks --track split_mu --track-right
+```
+
+Unlike the scripted maneuvers these are driven **closed-loop** by a minimal
+driver replacement: fixed kinematic steer δ = atan(L/R), a PI speed hold at
+the entry speed until the apex (heading = half the corner angle), then the
+throttle step — so a 90° corner is a 90° corner regardless of how fast each
+config exits. Every config drives the same driver, reset per run. The
+split-µ plant is built by `tracks.model_for` (scaled tire µ on the inner
+rear only — the controller is never told).
+
+What to expect on the current car data: at the plan's **100% apex step the
+whole rear axle is past its grip limit on every corner from 90° up** — open,
+s-diff and s-diff+TV spin, only TV survives (by yawing instead of
+accelerating). That is the same finding as the corner-exit test: no
+left/right split rescues an axle past its total budget, which is what the
+per-wheel slip limiter (Stage 3 of the plan) is for. **55%** is the window
+where the four configs separate; the 30°/45° corners separate at any
+throttle. Corner angle, radius, entry speed and apex throttle are recorded in
+every run's `manifest.json` / `summary.md` like any other test value.
+
 ## Extending toward the real car
 
 1. **Real parameters + TTC tire fit** in `car_data.py`, then retune the
