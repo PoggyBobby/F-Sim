@@ -130,3 +130,109 @@ def rank_configs(results):
              + (0 if results[n]["metrics"].get("finished", True) else 100)
              for n in names}
     return sorted(((n, score[n], ranks[n]) for n in names), key=lambda x: x[1])
+
+
+# ────────────────────────────────────────────────────── ideal corner sheet
+def understeer_gradient(vp: VehicleParams, tp_f: TireParams, tp_r: TireParams):
+    """K_us [s²/m] from the linearized tire stiffnesses at static axle
+    loads — the same expression the TV reference uses."""
+    m, L = vp.m_total, vp.wheelbase
+    C_f = tp_f.c_alpha * m * G * vp.b / L
+    C_r = tp_r.c_alpha * m * G * vp.a / L
+    return m / L * (vp.b / C_f - vp.a / C_r)
+
+
+def ideal_corner(vp: VehicleParams, tp_f: TireParams, tp_r: TireParams,
+                 radius: float, corner_deg: float = None,
+                 entry_frac: float = 0.9, mu: float = None) -> dict:
+    """Ideal inputs and outputs for a steady corner of radius R, entered at
+    entry_frac·√(µgR). Everything comes from car_data.py through the
+    parameter containers; the tire is asked (not assumed) for its peaks."""
+    from sensors import steer_map_inv_deg
+    tire = MagicFormulaTire(tp_r)
+    m, L, h = vp.m_total, vp.wheelbase, vp.h_cg
+    mu_y = tp_r.mu0 if mu is None else mu
+
+    v = entry_frac * math.sqrt(mu_y * G * radius)
+    r = v / radius
+    ay = v * v / radius
+    K_us = understeer_gradient(vp, tp_f, tp_r)
+    d_kin = math.atan(L / radius)
+    d_ss = d_kin + K_us * ay
+    downforce = 0.5 * RHO_AIR * vp.ClA * v * v
+    drag = 0.5 * RHO_AIR * vp.CdA * v * v
+
+    # rear loads: static + rear aero share + lateral transfer (rear share)
+    Fz_r_axle = m * G * vp.a / L + (1.0 - vp.aero_balance_front) * downforce
+    dF_r = (1.0 - vp.lat_transfer_frac_front) * m * ay * h / vp.track_r
+    Fz_in = max(Fz_r_axle / 2.0 - dF_r, 0.0)
+    Fz_out = Fz_r_axle / 2.0 + dF_r
+
+    # lateral demand on the rear axle (moment balance), shared by load;
+    # what is left for drive on the friction ellipse
+    Fy_r = m * ay * vp.a / L
+    def fx_avail(Fz):
+        if Fz <= 0:
+            return 0.0
+        fy = Fy_r * Fz / Fz_r_axle
+        util = min(fy / (tire.mu(Fz) * Fz), 1.0)
+        return tire.mu_x(Fz) * Fz * math.sqrt(max(1.0 - util * util, 0.0))
+    Fx_in, Fx_out = fx_avail(Fz_in), fx_avail(Fz_out)
+    T_in_max, T_out_max = Fx_in * vp.r_wheel, Fx_out * vp.r_wheel
+    T_axle_peak = 2.0 * vp.T_wheel_max
+
+    # torque that just holds speed: aero drag + tire induced drag (linear α)
+    Fy_f = m * ay * vp.b / L
+    Fz_f_axle = m * G * vp.b / L + vp.aero_balance_front * downforce
+    alpha_f = Fy_f / (tp_f.c_alpha * Fz_f_axle) if Fz_f_axle > 0 else 0.0
+    alpha_r = Fy_r / (tp_r.c_alpha * Fz_r_axle) if Fz_r_axle > 0 else 0.0
+    F_induced = Fy_f * math.sin(alpha_f) + Fy_r * math.sin(alpha_r)
+    T_hold = vp.r_wheel * (drag + F_induced)
+
+    # wheel speeds with no slip: each rear at v ∓ r·t/2
+    v_in, v_out = v - r * vp.track_r / 2.0, v + r * vp.track_r / 2.0
+    w_in, w_out = v_in / vp.r_wheel, v_out / vp.r_wheel
+    rpm = lambda w: w * vp.gear_ratio / cd.RPM
+
+    # entry braking picture: limit decel from the top speed down to v.
+    # BPS commands regen only in this sim; the rest is mechanical brakes.
+    mu_x = tire.mu_x(tp_r.Fz_nom)
+    a_brake = mu_x * (G + downforce / m)
+    T_brake_total = m * a_brake * vp.r_wheel
+    T_regen = min(T_brake_total, cd.T_REGEN_MAX)
+    bps_bar = cd.BPS_RANGE_BAR * T_regen / cd.T_REGEN_MAX
+    dist = max(V_TOP_MPS ** 2 - v * v, 0.0) / (2.0 * a_brake)
+
+    return {
+        "corner [deg]": corner_deg if corner_deg is not None else float("nan"),
+        "radius [m]": radius,
+        "entry speed [m/s]": v,
+        "lateral accel [g]": ay / G,
+        "yaw rate [rad/s]": r,
+        "steer kinematic [deg]": math.degrees(d_kin),
+        "steer w/ understeer [deg]": math.degrees(d_ss),
+        "handwheel [deg]": steer_map_inv_deg(math.degrees(d_ss)),
+        "inner ground speed [m/s]": v_in,
+        "outer ground speed [m/s]": v_out,
+        "inner wheel [rad/s]": w_in,
+        "outer wheel [rad/s]": w_out,
+        "inner motor [rpm]": rpm(w_in),
+        "outer motor [rpm]": rpm(w_out),
+        "ideal dw RR-RL [rad/s]": (w_out - w_in),
+        "Fz inner rear [N]": Fz_in,
+        "Fz outer rear [N]": Fz_out,
+        "tire peak kappa inner [-]": tire.kappa_at_peak(Fz_in) if Fz_in > 0 else 0.0,
+        "tire peak kappa outer [-]": tire.kappa_at_peak(Fz_out),
+        "T inner before spin [Nm]": T_in_max,
+        "T outer before spin [Nm]": T_out_max,
+        "throttle ceiling open 50/50 [%]": min(2.0 * T_in_max / T_axle_peak, 1.0) * 100.0,
+        "throttle ceiling ideal split [%]": min((T_in_max + T_out_max) / T_axle_peak, 1.0) * 100.0,
+        "hold-speed torque [Nm]": T_hold,
+        "hold-speed throttle [%]": T_hold / T_axle_peak * 100.0,
+        "entry brake decel limit [g]": a_brake / G,
+        "entry brake torque total [Nm]": T_brake_total,
+        "entry regen share [Nm]": T_regen,
+        "entry mechanical brake remainder [Nm]": T_brake_total - T_regen,
+        "entry brake pressure (regen map) [bar]": bps_bar,
+        "entry braking distance from top speed [m]": dist,
+    }
