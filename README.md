@@ -136,6 +136,40 @@ Sensor noise is seeded: runs are repeatable and every config sees identical
 noise. `--perfect-state` bypasses the whole stack (verify.py tests physics
 that way).
 
+## The real VCU firmware in the loop — `sil/`
+
+The team's VCU code (SRE-VCU, `custom-inverters` branch, pinned as the
+submodule `sil/SRE-VCU`) can drive the sim as a fifth controller config,
+software-in-the-loop:
+
+```bash
+git submodule update --init sil/SRE-VCU     # once, after cloning
+make -C sil                                 # -> sil/build/vcu_sil
+.venv/bin/python run_sim.py --sil --maneuver corner_exit --no-animate
+```
+
+`make -C sil` compiles the firmware sources **unchanged** with clang: the
+XC2000 types become fixed-width host types, the TTTech IO library is
+replaced by stubs (`sil/host/io_stubs.c`) whose real-time clock advances
+one 10 ms cycle per `IO_Driver_TaskEnd()`, so the firmware's own main loop
+paces itself. Every cycle the sim writes one line of raw sensor readings to
+the binary's stdin at `IO_Driver_TaskBegin()` and reads back what the
+firmware put on the rear inverters' command frames at `IO_Driver_TaskEnd()`
+(protocol: `sil/host/sil_link.h`). Each run boots a fresh VCU and waits out
+its boot sequence (`VCU_SIL_BOOT_S`) before t = 0.
+
+**Status:** plumbing only. The firmware commands the custom inverters in
+duty cycle or current, not torque, and nothing serves the sim's sensors to
+its ADC/CAN reads yet, so the `VCU (SIL)` config puts **zero torque** into
+the plant; the command frames it sends are counted and printed under each
+table. Next steps: feed `sil_in` into the ADC/CAN stubs, and a
+command-to-torque model for the custom inverters.
+
+`sil/patches/` holds firmware bugs the host build cannot survive (NULL
+CAN-history nodes, unstored CAN message limits), applied to a build copy
+only — the submodule is never modified. Each one is a fix to make upstream
+so the patch can be deleted.
+
 ## Watching it — `runs/<run>/replay/<maneuver>.mp4`
 
 One video per maneuver, all four controller configs driving it at once from
