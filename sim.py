@@ -60,6 +60,10 @@ def simulate(model: VehicleModel, controller, maneuver, dt=2.5e-4, log_every=4,
             "delta", "T_req", "T_RL", "T_RR", "r_ref", "dw_target",
             "dT_sdiff", "dT_tv", "beta", "ay", "ax",
             "kRL", "kRR", "FzFL", "FzFR", "FzRL", "FzRR", "P_total",
+            "vx_est", "r_meas", "apps", "bps", "handwheel", "plaus_cut",
+            # VCU-derived estimates (sensors.py): wheel-only speed, per-wheel
+            # slip-ratio estimates, steering-explained Δω
+            "vx_wheel", "kRL_est", "kRR_est", "dw_geo")}
             "vx_est", "r_meas", "apps", "bps", "handwheel", "plaus_cut")}
 
     dbg = None
@@ -107,6 +111,14 @@ def simulate(model: VehicleModel, controller, maneuver, dt=2.5e-4, log_every=4,
                 log["bps"].append(sr.bps_bar)
                 log["handwheel"].append(sr.handwheel_deg)
                 log["plaus_cut"].append(1.0 if controller.plaus_cut else 0.0)
+                log["vx_wheel"].append(sr.vx_wheel_est)
+                log["kRL_est"].append(sr.kappa_est_RL)
+                log["kRR_est"].append(sr.kappa_est_RR)
+                log["dw_geo"].append(sr.dw_geo)
+            else:
+                for nm in ("vx_est", "r_meas", "apps", "bps", "handwheel",
+                           "plaus_cut", "vx_wheel", "kRL_est", "kRR_est",
+                           "dw_geo"):
             else:
                 for nm in ("vx_est", "r_meas", "apps", "bps", "handwheel",
                            "plaus_cut"):
