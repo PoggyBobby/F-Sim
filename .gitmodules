@@ -1,0 +1,3 @@
+[submodule "reference/VehicleSim"]
+	path = reference/VehicleSim
+	url = git@github.com:spartanracingelectric/VehicleSim.git
