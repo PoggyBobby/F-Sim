@@ -1,0 +1,5 @@
+[submodule "sil/SRE-VCU"]
+	path = sil/SRE-VCU
+	url = https://github.com/spartanracingelectric/SRE-VCU.git
+	branch = custom-inverters
+	shallow = true
