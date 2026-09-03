@@ -1,0 +1,51 @@
+namespace: loads
+
+about: >
+  Load transfer. The front/rear split is derived from the report's spring
+  rates; the two rates are entered so the ratio is visible and refinable.
+
+spring_rate_front:
+  value:  19.3
+  unit:   "-"
+  display_unit: N/mm (ratio only)
+  symbol: ks_f
+  status: FROM REPORT
+  what:   Front suspension spring rate. Used ONLY through its ratio to the rear.
+  need:   Front roll stiffness incl. ARBs and motion ratios
+  how:    Suspension team
+  why:    Numerator of the lateral load-transfer split.
+  note: >
+    Report spring units say "N/m"; clearly N/mm. The RATIO is unit-independent,
+    which is all that is used here.
+
+spring_rate_rear:
+  value:  24.8
+  unit:   "-"
+  display_unit: N/mm (ratio only)
+  symbol: ks_r
+  status: FROM REPORT
+  what:   Rear suspension spring rate. Used ONLY through its ratio to the front.
+  need:   Rear roll stiffness incl. ARBs and motion ratios
+  how:    Suspension team
+  why:    Denominator half of the lateral load-transfer split.
+
+lat_transfer_frac_front:
+  derived: loads.spring_rate_front / (loads.spring_rate_front + loads.spring_rate_rear)
+  unit:   "-"
+  display_unit: 0-1
+  symbol: "-"
+  status: FROM REPORT (spring-rate ratio only) — crude
+  what: >
+    Share of total LATERAL load transfer reacted by the FRONT axle, set by the
+    front/rear roll-stiffness split.
+  need:   Front vs rear roll stiffness
+  how: >
+    Suspension team: roll rates including ARBs, motion ratios and roll-center
+    heights
+  why: >
+    Which axle eats the load transfer = which axle loses grip first — trades
+    understeer/oversteer at the limit.
+  note: >
+    Crude: with equal tracks the split is approximated as
+    ks_f/(ks_f + ks_r) = 19.3/(19.3+24.8) = 0.438, ignoring ARBs, motion ratios
+    and roll-center heights.

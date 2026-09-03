@@ -1,0 +1,60 @@
+namespace: sensors.steering_angle
+
+about: >
+  SAS — the steering-angle sensor sits at the HANDWHEEL. The VCU converts its
+  reading to a road-wheel angle through the team's steering-chart map:
+      y = A0 + A1*x + A2*x^2
+  used odd-symmetrically (sign(x)*map(|x|)) and centered so map(0) = 0. The
+  -0.0797 deg intercept is fit noise — an offset that size would pull the car
+  left with the wheel straight.
+
+  Source: team steering chart 2026-08-30 ("LWheel(Deg)"). Confirmed y = LEFT
+  road-wheel angle [deg]; x is the STEERING-WHEEL angle [deg]. The curve reaches
+  23.2 deg (the team's stated max road-wheel angle) at x ~ 105 deg, a typical
+  FSAE lock. Implied steering ratio: ~3.2:1 near center, ~7.5:1 at lock.
+
+map_a0:
+  value:  -0.0797
+  unit:   "-"
+  display_unit: deg (intercept)
+  symbol: A0
+  status: CURRENT CAR (team chart)
+  what:   Constant term of the handwheel -> road-wheel polynomial.
+  need:   The steering curve including RWheel
+  how:    Steering chart / kinematics sweep
+  why:    Subtracted out to center the map; kept so the raw fit stays visible.
+
+map_a1:
+  value:  0.31
+  unit:   "-"
+  display_unit: deg/deg
+  symbol: A1
+  status: CURRENT CAR (team chart)
+  what:   Linear term — the near-center steering ratio.
+  need:   The steering curve including RWheel
+  how:    Steering chart / kinematics sweep
+  why:    How the VCU turns the SAS reading into a road-wheel angle.
+
+map_a2:
+  value:  -8.44e-4
+  unit:   "-"
+  display_unit: deg/deg^2
+  symbol: A2
+  status: CURRENT CAR (team chart; -844E-04 read as -8.44E-04)
+  what:   Quadratic term — the ratio falling off toward lock.
+  need:   The steering curve including RWheel
+  how:    Steering chart / kinematics sweep
+  why:    Full lock 23 deg is about 103 deg of handwheel.
+  note: >
+    Read as -8.44E-04; the literal -0.0844 makes the curve peak at x ~ 1.8 deg
+    — not a wheel-angle chart.
+
+quant_deg:
+  value:  0.5
+  unit:   deg/LSB
+  symbol: "-"
+  status: PLACEHOLDER — sensor spec
+  what:   Steering-angle sensor resolution, at the handwheel.
+  need:   Sensor spec
+  how:    Datasheet of the chosen SAS
+  why:    Steering resolution the VCU actually sees.

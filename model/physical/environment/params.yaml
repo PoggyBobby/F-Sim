@@ -1,0 +1,25 @@
+namespace: environment
+
+about: >
+  The world the car drives in. Both values are read so widely that
+  model/config.py re-exports them as bare G and RHO_AIR.
+
+g:
+  value:  9.81
+  unit:   m/s^2
+  symbol: g
+  status: CONSTANT (physical)
+  what:   Standard gravitational acceleration — sets every weight and load.
+  need:   Nothing
+  how:    Physical constant
+  why:    Everything vertical scales from it.
+
+rho_air:
+  value:  1.204
+  unit:   kg/m^3
+  symbol: rho
+  status: FROM REPORT
+  what:   Density of the air the car drives through — sets downforce and drag.
+  need:   Ambient conditions on event days (optional refinement)
+  how:    Weather data / altitude correction
+  why:    Downforce and drag are 0.5*rho*(coeff*A)*v^2 — 5% density = 5% aero.

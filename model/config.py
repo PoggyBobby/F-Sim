@@ -1,559 +1,378 @@
 """
 ╔═══════════════════════════════════════════════════════════════════════════╗
-║                    MASTER CAR DATA FILE  —  EDIT ME                       ║
+║              CAR DATA LOADER  —  the numbers live in YAML                  ║
 ║                                                                           ║
-║  Every number the simulation uses is set HERE and pulled from here by     ║
-║  the rest of the code. This is the ONLY file you change for car data.     ║
+║  Every number the simulation uses is set in a `params.yaml` next to the    ║
+║  component it describes, and pulled from there by the rest of the code.    ║
+║  This module finds those files, converts units, computes derived values,   ║
+║  and exposes them as `cfg`.                                                ║
 ╚═══════════════════════════════════════════════════════════════════════════╝
 
-DATA SOURCES / TAGS
-───────────────────
-  STATUS 2026-08-30 — everything tagged FROM REPORT / DERIVED comes from
-  "1ME295B Project Report_FINALJW-2.pdf" (Table 1, SJSU MS project on the
-  OLD 2023 car). The team has been told the NEW car's numbers will come out
-  very similar, so these are now the sim's WORKING BASELINE — no longer
-  throwaway placeholders, and the sim's results can be quoted as real
-  (subject to the tire caveat below).
-
-  What "the new car is similar" does NOT do:
-    • it does not fix the report's own internal contradictions — see the
-      MASS box and WEIGHT_FRACTION_FRONT, both still open;
-    • it does not supply what the report never had — tire GRIP data and
-      aero balance are still PLACEHOLDER guesses, and the tire numbers are
-      what the s-diff/TV results are most sensitive to;
-    • it does not settle drivetrain design choices (GEAR_RATIO) that the
-      new car picks fresh rather than inherits.
-  When the new car is actually measured, these values get VERIFIED against
-  it, and whatever comes back different gets replaced.
-  Exception: entries tagged CURRENT CAR are for the car being built now.
-
-  ⚠️ TEAM DECISION 2026-08-30: this parameter set is declared the FINAL
-  DESIGN set (TTC access not available; pack voltage fixed at 380 V).
-  "Final" freezes the values — it does not upgrade their provenance: the
-  tire block remains unvalidated estimates, so absolute outputs remain
-  indicative and config-vs-config comparisons remain the solid product.
-
-  FROM REPORT   — Table 1 value (2023 car), adopted as our working number
-                  on the team's "the new car will be very similar" call.
-  DERIVED       — computed from report values (formula shown).
-  CURRENT CAR   — reported by the team for the car being built now.
-  PLACEHOLDER   — a guess; no source at all yet.
-  RULES VALUE   — fixed by the FSAE EV rulebook.
-  SUSPECT       — entered from the report, but the value conflicts with
-                  other numbers in the same table or with physical sanity.
-
-HOW TO EDIT THIS FILE
+WHERE THE NUMBERS ARE
 ─────────────────────
-1. Everything in the code runs in SI units: kg, m, s, N, N·m, W, rad.
-   If you measured something in imperial, DON'T convert by hand — enter it
-   using the conversion constants below, e.g.:
+    model/physical/environment/params.yaml   g, air density
+    model/physical/mass/params.yaml          car + driver mass
+    model/physical/geometry/params.yaml      wheelbase, track, CG, yaw inertia
+    model/physical/drivetrain/params.yaml    wheels, gearing, AMK motors, limits
+    model/physical/aero/params.yaml          C_L, C_D, frontal area, balance
+    model/physical/steering/params.yaml      Ackermann fraction
+    model/physical/loads/params.yaml         lateral load-transfer split
+    model/physical/numerical/params.yaml     solver guards
+    model/physical/tires/params.yaml         Magic Formula coefficients
+    model/sensors/<sensor>/params.yaml       one file per sensor
+    controllers/python/params.yaml           the tuned controller gains
+    sil/params.yaml                          software-in-the-loop timing
 
-        CAR_MASS_NO_DRIVER = 507.0 * LB       # weighed 507 lb on the scales
-        H_CG               = 11.0  * INCH     # 11 inches
-        MOTOR_TORQUE_PEAK  = 23.6  * LBFT     # 23.6 lb-ft
+READING A VALUE
+───────────────
+    from model.config import cfg
 
-2. When you replace a value, update its tag to e.g.
-   `MEASURED 2026-09-01 (corner scales)` so we know which numbers are real.
+    cfg.mass.car_no_driver          # 181.51 (kg, SI — always SI)
+    cfg.sensors.imu_6axis.gyro_bias # 0.001745 (rad/s)
+    cfg.tires.mu0                   # 1.737 (derived: road_scale * belt_mu_lat)
 
-3. Each parameter is documented as:
-        What:  plain-language definition
-        Unit:  SI unit the code expects (+ imperial entry hint)
-        From:  where/how the team gets the real value
+Attribute access only — a typo raises immediately instead of returning None.
 
-4. After editing, just rerun:  .venv/bin/python run_sim.py
-   NOTE: if vehicle/tire values change meaningfully, the controller gains
-   at the bottom of this file must be retuned.
+    cfg.meta("mass.car_no_driver")  # the full entry: value, unit, status,
+                                    # what/need/how/why, and the SI value
+
+ENTRY SCHEMA
+────────────
+    car_no_driver:
+      value:  400.1              # as measured, in the unit below
+      unit:   lb                 # converted to SI on load; "-" = dimensionless
+      symbol: m_car              # as written in the equations
+      status: MEASURED 2026-08-31 (corner scales)
+      what:   Complete ready-to-run vehicle, nobody in the seat.
+      need:   Total car weight
+      how:    Corner scales (Intercomp SW500)
+      why:    With driver mass it sets EVERY inertial and grip force.
+
+`status` is the provenance tag, and the vocabulary is fixed (see STATUS_TAGS):
+FROM REPORT / DERIVED / CURRENT CAR / PLACEHOLDER / RULES VALUE / SUSPECT /
+MEASURED / TTC FIT / TUNED (sim) / NUMERICAL GUARD / CONSTANT. Anything that
+starts with one of those counts as that tag, so a date or a note can follow.
+
+A derived entry carries a formula instead of a value:
+
+    total:
+      derived: mass.car_no_driver + mass.driver
+      unit:   kg
+
+The formula is evaluated against the already-loaded config, in dependency
+order, so it can reference any other entry by its full dotted path. Keeping
+the formula in the data file (rather than in code) is the point: the sheet and
+the docs can show *how* a number is computed, not just what it came out as.
+
+HOW TO EDIT
+───────────
+1. Values are entered in whatever unit you MEASURED in — set `unit` and the
+   loader converts. Don't hand-convert.
+2. When you replace a value, update its `status` (e.g.
+   `MEASURED 2026-09-01 (corner scales)`) so we know which numbers are real.
+3. After editing, just rerun:  .venv/bin/python run_sim.py
+   NOTE: if vehicle/tire values change meaningfully, the controller gains in
+   controllers/python/params.yaml must be retuned.
+4. Regenerate the team sheet with:  .venv/bin/python param_sheet.py
 
 (Test-maneuver settings — speeds, steer angles, throttle profiles — are
-scenario definitions, not car data; those live in maneuvers.py.)
+scenario definitions, not car data; those live in model/maneuvers/.)
 """
 
 import math
+import os
 
-# ─────────────────────────────────────────────────────────────────────────
-# UNIT CONVERSIONS — multiply your measured value by these to get SI
-# ─────────────────────────────────────────────────────────────────────────
-LB   = 0.45359237      # kg per pound-mass        (weight/mass)
-INCH = 0.0254          # m per inch               (lengths)
-FT   = 0.3048          # m per foot
-LBFT = 1.3558179       # N·m per lb-ft            (torque)
-MPH  = 0.44704         # m/s per mph              (speed)
-HP   = 745.699872      # W per horsepower         (power)
-DEG  = math.pi / 180.0 # rad per degree           (angles)
-RPM  = math.pi / 30.0  # rad/s per rev-per-minute (rotational speed)
+import yaml
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# ENVIRONMENT
+# UNIT CONVERSIONS — an entry's `unit` picks one; the code always sees SI
 # ─────────────────────────────────────────────────────────────────────────
-# What:  standard gravity. A physical constant — never edit.
-# Unit:  m/s²
-G = 9.81                                # FROM REPORT (same as standard)
+LB = 0.45359237       # kg per pound-mass         (weight/mass)
+INCH = 0.0254         # m per inch                (lengths)
+FT = 0.3048           # m per foot
+LBFT = 1.3558179      # N·m per lb-ft             (torque)
+MPH = 0.44704         # m/s per mph               (speed)
+HP = 745.699872       # W per horsepower          (power)
+DEG = math.pi / 180.0  # rad per degree            (angles)
+RPM = math.pi / 30.0  # rad/s per rev-per-minute  (rotational speed)
 
-# What:  air density, used for downforce and drag.
-# Unit:  kg/m³
-RHO_AIR = 1.204                         # FROM REPORT
+UNITS = {
+    # mass
+    "kg": 1.0, "lb": LB,
+    # length
+    "m": 1.0, "in": INCH, "ft": FT, "mm": 1e-3,
+    # angle / rotation
+    "rad": 1.0, "deg": DEG,
+    "rad/s": 1.0, "deg/s": DEG, "rpm": RPM,
+    # speed
+    "m/s": 1.0, "mph": MPH, "km/h": 1.0 / 3.6,
+    # force / torque / power / pressure
+    "N": 1.0, "N*m": 1.0, "lbft": LBFT,
+    "N*m/rad": 1.0, "N*m/(rad/s)": 1.0,
+    "W": 1.0, "hp": HP,
+    "bar": 1.0, "V": 1.0,
+    # composite / dimensionless
+    "m/s^2": 1.0, "kg/m^3": 1.0, "kg*m^2": 1.0, "m^2": 1.0,
+    "Hz": 1.0, "s": 1.0, "%": 1.0, "1/rad": 1.0, "1/slip": 1.0,
+    "-": 1.0,
+    # Per-LSB resolutions. These are NOT converted: a sensor's quantization is
+    # applied in the unit that sensor reports in (the SAS reads handwheel
+    # degrees, the AMK resolver reports motor rpm), and the sensor modules
+    # quantize before converting. Converting here would quantize in the wrong
+    # unit and silently change every reading.
+    "deg/LSB": 1.0, "rpm/LSB": 1.0, "%/LSB": 1.0, "bar/LSB": 1.0,
+}
 
+# Provenance vocabulary. Order matters: longest-first so "TUNED (sim)" is not
+# swallowed by a shorter prefix. runlog.py and param_sheet.py both key off it.
+STATUS_TAGS = (
+    "NUMERICAL GUARD", "RULES VALUE", "CURRENT CAR", "PLACEHOLDER",
+    "FROM REPORT", "TUNED (sim)", "TTC FIT", "MEASURED", "DERIVED",
+    "SUSPECT", "CONSTANT",
+)
 
-# ─────────────────────────────────────────────────────────────────────────
-# MASS  — read this box before entering anything
-# ─────────────────────────────────────────────────────────────────────────
-# The sim wants mass WITHOUT driver and DRIVER mass as two separate entries;
-# total-with-driver is computed (m_total = car + driver), never entered.
-#
-# HISTORY (kept because it explains why earlier runs used 241.7 kg): until
-# 2026-08-30 the total came from the report's single m_t = 241.7 kg, read
-# as car+driver, split 166.7 + 75. The report's own mass rows never added
-# up (sprung 180.9 + 2 × unsprung 30.4 = 241.7 — one row double-counts),
-# and 166.7 kg was flagged as implausibly light. The team's real number
-# below supersedes all of that. Runs 001–010 ran at 241.7 kg total; runs
-# from here run at ~256 kg (+6%) — metrics across that boundary are not
-# directly comparable.
+# Tags meaning "confirmed for the car we are actually building" — param_sheet
+# colours these green.
+GREEN_TAGS = {"CURRENT CAR", "MEASURED", "TTC FIT"}
 
-# What:  complete ready-to-run vehicle mass, NO driver seated.
-# Unit:  kg (weighed in lbs — entered exactly as reported, in lbs)
-# From:  CORNER SCALES 2026-08-31 (E-Z Weight Intercomp SW500), no driver:
-#            LF  87.5 lb    RF  86.3 lb      front pair 173.8 lb (43.44%)
-#            LR 114.8 lb    RR 111.5 lb      rear pair  226.3 lb
-#            total 400.1 lb   left 50.56%   cross (RF+LR) 50.26%
-#        Left/right is 0.56% asymmetric (≈1 kg heavier left) — the sim
-#        assumes perfect L/R symmetry; at that size the error is noise.
-#        Cross weight is a setup number this sim doesn't use; recorded for
-#        the suspension crew.
-CAR_MASS_NO_DRIVER = 400.1 * LB         # MEASURED 2026-08-31 (corner scales) = 181.5 kg
+REQUIRED_FIELDS = ("unit", "what")
 
-# What:  driver mass in full gear (suit, helmet, shoes). Convention: use
-#        the HEAVIEST regular driver for conservative tuning — if 156 lb
-#        is not the heaviest, bump this when the roster is known. Confirm
-#        whether 156 was weighed suited (gear adds ~5-8 lb).
-# Unit:  kg   (entered in lbs, exactly as reported)
-# From:  team, 2026-08-30: "the driver is 156 lbs".
-DRIVER_MASS = 156.0 * LB                # CURRENT CAR (team) = 70.8 kg
+# Repo root = the directory containing model/. Every search path is relative
+# to it, so the sim runs the same from any working directory.
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-
-# ─────────────────────────────────────────────────────────────────────────
-# GEOMETRY & CG (whole-vehicle values — the sim is a single rigid body)
-# ─────────────────────────────────────────────────────────────────────────
-# What:  distance between front and rear axle centerlines.
-# Unit:  m   (inches?  write e.g.  61.0 * INCH)
-# From:  report L_f + L_r = 0.64 + 0.88. (The report's sprung-CG distances
-#        sum to 1.524 — 4 mm off; the vehicle-CG pair is used here.)
-WHEELBASE = 1.52                        # DERIVED from report (L_f + L_r)
-
-# What:  front track width — distance between the CENTERS of the two front
-#        tire contact patches (NOT outside-to-outside of the tires).
-# Unit:  m
-TRACK_FRONT = 1.34                      # FROM REPORT
-
-# What:  rear track width, same definition as front.
-# Unit:  m
-TRACK_REAR = 1.34                       # FROM REPORT
-
-# What:  static front weight fraction = front axle weight / total weight.
-#        By statics this equals (CG-to-REAR-axle distance)/wheelbase.
-# Unit:  dimensionless, 0..1
-# From:  CORNER SCALES 2026-08-31, NO driver: (87.5+86.3)/400.1 = 43.44%
-#        front — finally replaces the old report's self-contradictory
-#        46%/58%. ⚠️ ONE STEP LEFT: the sim runs WITH a driver, and a
-#        seated driver's CG sits aft of mid-wheelbase, so the true
-#        with-driver front share is ~1–2% LOWER than this car-only number
-#        (estimate ≈ 41.5–43%). Using the car-only measurement until the
-#        team repeats the weighing with the driver seated — one more
-#        minute on the same scales.
-WEIGHT_FRACTION_FRONT = 0.4344          # MEASURED 2026-08-31 (scales, NO driver — redo seated)
-
-# What:  height of the CG above the ground. Drives ALL load transfer.
-# Unit:  m   (inches?  write e.g.  11.0 * INCH)
-# From:  report h = 0.23 m — strictly the SPRUNG-mass CG height, but with
-#        unsprung CGs at wheel-center height (~0.20 m) the whole-vehicle
-#        value works out to ≈0.226 m, so 0.23 is fine as-is.
-H_CG = 0.23                             # FROM REPORT (sprung ≈ total)
-
-# What:  yaw moment of inertia of the whole vehicle about the vertical
-#        axis through the CG. Sets how fast yaw rate responds to the TV
-#        yaw moment.
-# Unit:  kg·m²
-I_Z = 70.38                             # FROM REPORT (J_z)
+SEARCH_DIRS = ("model", "controllers", "sil")
 
 
-# ─────────────────────────────────────────────────────────────────────────
-# WHEELS & DRIVETRAIN
-# Layout (team-confirmed 2026-08-30): FOUR motors fitted, one per wheel
-# (hub drive, planetary reduction in each upright) — the TWO REAR ones are
-# active in the current build, 4WD is the goal. This sim models the active
-# 2-motor rear axle; the 4WD extension is described in README.md.
-# Motors: AMK "Racing Kit" A2370DD (DD5-type synchronous servo) with
-# KW26-S5-FSE-4Q inverters — see "AMK Racing Kit Datasheet.pdf" in this
-# folder (kit manual; exact motor data sheet: Motor_data_sheet_A2370DD_DD5).
-# ─────────────────────────────────────────────────────────────────────────
-# What:  LOADED tire radius — ground to axle center with the car's weight
-#        on the tire. Converts wheel torque to drive force (F = T/r) and
-#        wheel speed to ground speed.
-# Unit:  m
-# From:  CURRENT CAR runs 18-inch outer-diameter tires on 10-inch rims
-#        (team-reported). Radius = 18"/2 = 0.2286 m. The rim size doesn't
-#        enter the sim — only the tire's rolling radius does. The LOADED
-#        radius is a few mm less than free radius (tire squish); measure
-#        axle-center height with the car on the ground to refine.
-#        (The old report's "0.406 m radius" was that car's tire diameter.)
-WHEEL_RADIUS = 18.0 * INCH / 2.0        # CURRENT CAR (18in tire OD, 10in rim)
+class ConfigError(Exception):
+    """A params.yaml is malformed, incomplete, or contradicts another."""
 
-# What:  total reduction between motor shaft and wheel (motor revs per
-#        wheel rev). With one motor PER WHEEL this is the PLANETARY gear
-#        stage packaged in each upright with the motor — not a chain or
-#        gearbox. It must exist: the A2370DD makes 21 N·m at up to
-#        20,000 rpm; direct drive would give 92 N of drive force per wheel
-#        (0.08 g car) and a 479 m/s speed match. Wheel torque = motor × gr,
-#        reflected rotor inertia = rotor J × gr².
-# Unit:  dimensionless
-# From:  old report gr = 13 (typical AMK-kit planetaries run 12–14.5:1).
-#        DESIGN CHOICE, not inherited — ask powertrain: "what is the
-#        reduction ratio of the planetary in our uprights?"
-GEAR_RATIO = 13.0                       # FROM REPORT — confirm upright planetary ratio
 
-# What:  peak torque of ONE motor at its shaft (before the gear reduction).
-#        → peak WHEEL torque = 21 × 13 = 273 N·m per side.
-# Unit:  N·m   (lb-ft?  write e.g.  23.6 * LBFT)
-# From:  AMK kit manual §6.5.3 torque curve: flat 21 N·m up to
-#        ~13,000 rpm at 600 VDC (motor A2370DD). Matches the old report.
-MOTOR_TORQUE_PEAK = 21.0                # CURRENT CAR (AMK kit datasheet)
+class Section:
+    """A dotted namespace of parameters. Attribute access, no silent None."""
 
-# What:  accumulator (HV pack) nominal voltage. Not used directly by the
-#        physics — it SETS the motor peak power below, and it is the
-#        number that sizes the car at the rules cap: 4 motors × ~20 kW at
-#        380 V = 80 kW exactly (the 4WD end state); the current 2-rear
-#        build tops out at ~40 kW, so the 80 kW cap is unreachable until
-#        4WD.
-# Unit:  V
-PACK_VOLTAGE = 380.0                    # CURRENT CAR (design decision 2026-08-30)
+    def __init__(self, path):
+        self._path = path
+        self._values = {}
+        self._subs = {}
 
-# What:  peak mechanical power of ONE motor at OUR pack voltage.
-# Unit:  W   (kW: write e.g. 20e3;  hp?  write e.g.  27.0 * HP)
-# From:  AMK kit manual §6.5.3 — peak power rides on HV voltage ("The
-#        maximum motor power dependents on the available HV voltage"),
-#        curves give ~26 kW @ 500 VDC and ~32 kW @ 600 VDC. Scaled to the
-#        380 V pack three ways: 26·(380/500) = 19.8 kW, 32·(380/600) =
-#        20.3 kW, base-speed method 21 N·m × (13 krpm·380/600) = 18.1 kW
-#        → 20 kW adopted. Refine by reading the 380 V curve directly or
-#        from a dyno pull once the pack exists.
-MOTOR_POWER_PEAK = 20e3                 # DERIVED from kit curves at PACK_VOLTAGE
+    def __getattr__(self, name):
+        if name.startswith("_"):
+            raise AttributeError(name)
+        if name in self._values:
+            return self._values[name]
+        if name in self._subs:
+            return self._subs[name]
+        known = sorted(list(self._values) + list(self._subs))
+        where = self._path or "cfg"
+        raise AttributeError(
+            f"{where} has no parameter '{name}'. Available: {', '.join(known)}"
+        )
 
-# What:  maximum motor speed. NOT enforced by this basic sim (with 13:1
-#        and 0.229 m tires it corresponds to ~36 m/s ≈ 130 km/h, far above
-#        the test maneuvers) — recorded for completeness / future top-speed
-#        studies. The inverter caps speed setpoints at 30,000 rpm.
-# Unit:  rad/s   (entered in rpm via the RPM constant)
-# From:  AMK kit manual §6.5.3 curves (characteristics end at 20,000 rpm).
-MOTOR_MAX_SPEED = 20000 * RPM           # CURRENT CAR (AMK kit datasheet)
+    def __dir__(self):
+        return sorted(list(self._values) + list(self._subs))
 
-# What:  spin inertia of ONE rear corner about the axle: tire + rim +
-#        brake rotor + hub + (motor rotor inertia × gear_ratio²). Sets how
-#        fast an unloaded wheel spins up — matters a lot to the s-diff.
-# Unit:  kg·m²
-# From:  estimate = tire+rim+hub ≈ 0.30 (PLACEHOLDER guess for an 18"
-#        tire on a 10" rim) + rotor inertia × gear² ≈ 2.74e-4 × 13² ≈ 0.05
-#        (rotor J is the typical A2370DD value — confirm from the motor
-#        data sheet, it is not in the kit manual). Replace with CAD.
-#        The old report's I_w = 3.033 was rejected: ~10× too large for one
-#        corner (possibly a 4-wheel total, and it's the old car anyway).
-I_WHEEL = 0.35                          # DERIVED estimate — replace with CAD
+    def __repr__(self):
+        return f"<Section {self._path or 'cfg'}: {len(self._values)} values, " \
+               f"{len(self._subs)} subsections>"
 
-# What:  total drive power cap from the FSAE EV rules (EV.4.2: 80 kW at
-#        the accumulator). Applied here to mechanical power — drivetrain
-#        efficiency is ignored in this basic sim.
-# Unit:  W
-POWER_CAP_TOTAL = 80e3                  # RULES VALUE (simplified)
+    # -- construction -----------------------------------------------------
+    def _sub(self, name):
+        if name not in self._subs:
+            child = Section(f"{self._path}.{name}" if self._path else name)
+            self._subs[name] = child
+        return self._subs[name]
 
-# What:  below this speed the controllers command no negative (regen)
-#        torque — the rules restrict regen near standstill (≈ 5 km/h).
-# Unit:  m/s   (5 km/h = 1.39 m/s)
-REGEN_SPEED_CUTOFF = 1.4                # RULES VALUE (approx.)
+
+class Config:
+    """The loaded parameter set: `cfg.mass.car_no_driver`, `cfg.meta(path)`."""
+
+    def __init__(self):
+        self._root = Section("")
+        self._meta = {}          # dotted path -> the full entry dict
+        self._files = {}         # dotted namespace -> source file (repo-relative)
+
+    def __getattr__(self, name):
+        if name.startswith("_"):
+            raise AttributeError(name)
+        return getattr(self._root, name)
+
+    def __dir__(self):
+        return dir(self._root)
+
+    # -- reads ------------------------------------------------------------
+    def get(self, dotted):
+        """Value at a dotted path, e.g. get('sensors.imu_6axis.gyro_bias')."""
+        node = self._root
+        for part in dotted.split("."):
+            node = getattr(node, part)
+        return node
+
+    def meta(self, dotted):
+        """The full entry for a path: value, si, unit, status, what/need/how/why."""
+        try:
+            return self._meta[dotted]
+        except KeyError:
+            raise ConfigError(f"no parameter at '{dotted}'") from None
+
+    def params(self):
+        """Every parameter, dotted path -> entry, in file/declaration order."""
+        return dict(self._meta)
+
+    def sections(self):
+        """Namespace -> source file, in load order (param_sheet walks this)."""
+        return dict(self._files)
+
+    def tag_of(self, dotted):
+        """The provenance tag of a parameter, or 'UNTAGGED'."""
+        status = str(self._meta[dotted].get("status", ""))
+        for tag in STATUS_TAGS:
+            if status.upper().startswith(tag.upper()):
+                return tag
+        return "UNTAGGED"
+
+    # -- construction -----------------------------------------------------
+    def _place(self, namespace, key, value):
+        node = self._root
+        for part in namespace.split("."):
+            node = node._sub(part)
+        node._values[key] = value
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# AERO — entered the way the report gives it: coefficients + frontal area.
-# The sim uses the products Cl·A and Cd·A, computed below.
+# loading
 # ─────────────────────────────────────────────────────────────────────────
-# What:  lift (downforce) coefficient, referenced to FRONTAL_AREA.
-# Unit:  dimensionless
-CL_COEFF = 3.18                         # FROM REPORT (C_L)
-
-# What:  drag coefficient, referenced to FRONTAL_AREA.
-# Unit:  dimensionless
-CD_COEFF = 1.36                         # FROM REPORT (C_D)
-
-# What:  aerodynamic frontal reference area.
-# Unit:  m²
-FRONTAL_AREA = 1.106                    # FROM REPORT (A_F)
-
-# Computed products the sim actually uses — don't edit these two lines,
-# edit the three entries above. Downforce = 0.5·rho·CLA·v², same for drag.
-CLA = CL_COEFF * FRONTAL_AREA           # DERIVED = 3.52 m²
-CDA = CD_COEFF * FRONTAL_AREA           # DERIVED = 1.50 m²
-
-# What:  fraction of total downforce landing on the FRONT axle (aero
-#        balance). 0.45 = 45% front / 55% rear.
-# Unit:  dimensionless, 0..1
-# From:  NOT in the report — get from aero team (CFD center of pressure).
-AERO_BALANCE_FRONT = 0.45               # PLACEHOLDER
+def _yaml_files(root=ROOT):
+    """Every params.yaml under the search dirs, in a stable sorted order."""
+    found = []
+    for top in SEARCH_DIRS:
+        base = os.path.join(root, top)
+        for dirpath, dirnames, filenames in os.walk(base):
+            dirnames[:] = sorted(d for d in dirnames
+                                 if d not in ("__pycache__", "build", "SRE-VCU"))
+            if "params.yaml" in filenames:
+                found.append(os.path.join(dirpath, "params.yaml"))
+    return sorted(found)
 
 
-# ─────────────────────────────────────────────────────────────────────────
-# STEERING GEOMETRY
-# ─────────────────────────────────────────────────────────────────────────
-# What:  Ackermann fraction — how much of the geometric (100%) Ackermann
-#        inner/outer steer split the steering actually delivers.
-#          0.0 = parallel steer (both fronts get the same angle)
-#          1.0 = full geometric Ackermann (inner = atan(L/(R − t/2)), etc.)
-#          negative = anti-Ackermann
-#        Only matters at large steer angles: at 5° the inner/outer split is
-#        ~±0.2°; at the 23° full-lock hairpin it is ~±4° per wheel.
-# Unit:  dimensionless (fraction of geometric Ackermann)
-# From:  steering/suspension team. Team chart curve (2026-08-30):
-#            LWheel(Deg) = -0.0797 + 0.31·x - 8.44E-04·x²
-#        Confirmed y = LEFT road-wheel angle [deg]. x is presumed the
-#        STEERING-WHEEL angle [deg]: the curve reaches 23.2° (the team's
-#        stated max road-wheel angle) at x ≈ 105°, a typical FSAE lock.
-#        (Quadratic coefficient read as -8.44E-04; the literal -0.0844
-#        makes the curve peak at x≈1.8° — not a wheel-angle chart.)
-#        Implied steering ratio: ~3.2:1 near center, ~7.5:1 at lock.
-#
-#        ⚠️ ONE wheel's curve cannot give the Ackermann SPLIT — that is the
-#        DIFFERENCE between the two wheels, and the fit is not valid
-#        through x=0, so the right wheel can't be mirror-derived. NEEDED
-#        from the same chart: the RWheel(Deg) polynomial (or a few x,
-#        LWheel, RWheel point triples). Then LWheel−RWheel vs x wires
-#        straight into vehicle.front_steer_angles. Until then the sim
-#        stays parallel-steer, as before.
-ACKERMANN_FRACTION = 0.0                # PLACEHOLDER — parallel steer
+def _to_si(value, unit, where):
+    if unit not in UNITS:
+        raise ConfigError(
+            f"{where}: unknown unit '{unit}'. Known units: "
+            f"{', '.join(sorted(UNITS))}"
+        )
+    return value * UNITS[unit]
 
 
-# ─────────────────────────────────────────────────────────────────────────
-# SENSORS & VCU — what the controller is allowed to know (sensors.py).
-# The controller no longer reads the simulation's perfect truth: it reads
-# these sensors, sampled at the VCU rate, with quantization and noise.
-# ─────────────────────────────────────────────────────────────────────────
-# What:  VCU control-loop rate — how often sensors are sampled and torque
-#        commands are recomputed (physics still integrates at 4 kHz).
-# Unit:  Hz
-# From:  software team — set to their real loop rate. 100 Hz proven stable
-#        for the current gains (verify.py section H).
-VCU_RATE_HZ = 100.0                     # PLACEHOLDER — ask software team
-
-# What:  software-in-the-loop (vcu_sil.py): how long the real firmware is
-#        left to boot — bench check (55 ms) + ADC settle loop (1 s) — before
-#        a maneuver's t = 0, measured on the firmware's own clock.
-# Unit:  s
-VCU_SIL_BOOT_S = 1.5                    # PLACEHOLDER — from main.c / initializations.c
-
-# What:  steering map — handwheel angle x [deg] to road-wheel angle [deg],
-#        the team chart's LWheel curve: y = A0 + A1·x + A2·x².
-#        Used odd-symmetrically (sign(x)·map(|x|)) and centered so
-#        map(0) = 0 (the −0.0797° intercept is fit noise — an offset that
-#        size would pull the car left with the wheel straight).
-# Unit:  deg → deg
-# From:  team steering chart 2026-08-30 ("LWheel(Deg)").
-STEER_MAP_A0 = -0.0797                  # CURRENT CAR (team chart)
-STEER_MAP_A1 = 0.31                     # CURRENT CAR (team chart)
-STEER_MAP_A2 = -8.44e-4                 # CURRENT CAR (team chart; -844E-04 read as -8.44E-04)
-
-# What:  steering-angle sensor (SAS) quantization, at the HANDWHEEL.
-# Unit:  deg per LSB
-SAS_QUANT_DEG = 0.5                     # PLACEHOLDER — sensor spec
-
-# What:  wheel-speed sensing = MOTOR shaft speed from the AMK resolver
-#        over CAN (there is no separate wheel sensor); VCU divides by the
-#        planetary ratio. Quantization of the reported motor speed.
-# Unit:  rpm per LSB (motor side)
-WSS_QUANT_RPM = 1.0                     # PLACEHOLDER — AMK CAN resolution
-
-# What:  IMU yaw-gyro 1-sigma noise and constant bias, and the first-order
-#        low-pass the VCU applies to the gyro before feedback.
-# Unit:  rad/s (entered in deg/s), Hz
-IMU_GYRO_NOISE_STD = 0.3 * DEG          # PLACEHOLDER — IMU spec (deg/s 1σ)
-IMU_GYRO_BIAS = 0.1 * DEG               # PLACEHOLDER — uncalibrated bias
-IMU_LPF_HZ = 20.0                       # PLACEHOLDER — VCU filter choice
-
-# What:  IMU accelerometer 1-sigma noise (ax, ay channels).
-# Unit:  m/s²
-IMU_ACCEL_NOISE_STD = 0.05              # PLACEHOLDER — IMU spec
-
-# What:  accelerator pedal position sensor (APPS) quantization. The pedal
-#        map is linear: APPS % → torque request, 100% = 2×T_wheel_max.
-# Unit:  percent per LSB
-APPS_QUANT_PCT = 0.5                    # PLACEHOLDER — sensor spec
-
-# What:  brake pressure sensor (BPS) full range, quantization, and the
-#        pressure above which the brake counts as "actuated" for the rules
-#        plausibility check.
-# Unit:  bar
-BPS_RANGE_BAR = 100.0                   # PLACEHOLDER — sensor spec
-BPS_QUANT_BAR = 0.5                     # PLACEHOLDER — sensor spec
-BPS_ACTUATED_BAR = 3.0                  # PLACEHOLDER — calibration choice
-
-# What:  total rear-axle REGEN torque at full brake pressure (mechanical
-#        brakes are NOT modeled — BPS commands regen only in this sim).
-# Unit:  N·m (total, both motors)
-T_REGEN_MAX = 250.0                     # PLACEHOLDER — battery charge limit sets this
-
-# What:  FSAE EV.4.7 APPS/BPS plausibility: >25% APPS while braking cuts
-#        motor power until APPS falls below 5%.
-# Unit:  percent
-PLAUS_APPS_CUT = 25.0                   # RULES VALUE (EV.4.7)
-PLAUS_APPS_RESTORE = 5.0                # RULES VALUE (EV.4.7)
-
-# What:  seed for the sensor-noise generator — runs are exactly repeatable
-#        and all four controller configs see IDENTICAL noise (fair fight).
-SENSOR_SEED = 2026                      # NUMERICAL GUARD (repeatability)
+def _check_entry(entry, where):
+    if not isinstance(entry, dict):
+        raise ConfigError(f"{where}: entry must be a mapping, got {type(entry).__name__}")
+    for field in REQUIRED_FIELDS:
+        if not entry.get(field):
+            raise ConfigError(f"{where}: missing required field '{field}'")
+    if "value" not in entry and "derived" not in entry:
+        raise ConfigError(f"{where}: needs either 'value' or 'derived'")
+    if "value" in entry and "derived" in entry:
+        raise ConfigError(f"{where}: has both 'value' and 'derived' — pick one")
+    if "value" in entry and not isinstance(entry["value"], (int, float)):
+        raise ConfigError(f"{where}: 'value' must be a number, "
+                          f"got {entry['value']!r}")
 
 
-# ─────────────────────────────────────────────────────────────────────────
-# LOAD TRANSFER
-# ─────────────────────────────────────────────────────────────────────────
-# What:  fraction of total LATERAL load transfer reacted by the front
-#        axle, set by the front/rear roll-stiffness split.
-# Unit:  dimensionless, 0..1
-# From:  DERIVED from the report's spring rates: with equal tracks the
-#        split ≈ ks_front/(ks_front + ks_rear) = 19.3/(19.3+24.8) = 0.438.
-#        Crude — ignores ARBs, motion ratios, and roll-center heights;
-#        refine with the suspension team's real roll-stiffness numbers.
-#        (Report spring units say "N/m"; clearly N/mm — the RATIO is
-#        unit-independent, which is all that's used here.)
-LAT_TRANSFER_FRAC_FRONT = 19.3 / (19.3 + 24.8)   # DERIVED from report
+def _eval_derived(expr, cfg, where):
+    """Evaluate a derived formula against the config loaded so far.
+
+    Only dotted parameter paths, numbers and arithmetic — no builtins, no
+    attribute tricks. A reference to a not-yet-loaded value raises, and the
+    caller retries it on the next pass.
+    """
+    scope = {"__builtins__": {}}
+    for name in dir(cfg):
+        scope[name] = getattr(cfg, name)
+    try:
+        return eval(expr, scope)          # noqa: S307 — restricted scope above
+    except AttributeError as exc:
+        raise _Unresolved(str(exc)) from None
+    except Exception as exc:
+        raise ConfigError(f"{where}: derived formula {expr!r} failed: {exc}") from None
 
 
-# ─────────────────────────────────────────────────────────────────────────
-# TIRES — ⚠️ the report contains NO tire GRIP data. Its "tire stiffness"
-# (113 832 N/m) is the VERTICAL spring rate of the carcass — useless for
-# grip. ✅ FITTED 2026-08-31 from TTC ROUND 9 (program B2356, Calspan
-# Jan 2022) — tire_fit.py, RunData Matlab SI files in ttc/.
-#
-# Our tire (Hoosier 18.0x7.5-10 R20, pattern FT28) was never TTC-tested,
-# so this is a POOLED SURROGATE FIT, same R20 compound:
-#     lateral:  43075 16x7.5-10 @8" (same width) + 43100 18.0x6.0-10 @7"
-#               (same OD) — 57,294 samples, RMS 87 N; the two tires
-#               individually agree within ±6% on µ₀, ±1% on stiffness
-#     longitudinal: 43100 18.0x6.0-10 (both rims) — 25,807 samples
-# Fit conditions & VALIDITY:
-#     12 psi (ASSUMED running pressure — confirm with team), |camber|<1°,
-#     loads 210–1150 N (covers our 430–620 N corners: interpolation ✓),
-#     slip angle sweeps ±12° — the R20 PLATEAUS there, it does not fall
-#     off; beyond ±12° the model extrapolates a flat plateau. No camber
-#     effects modeled (fit at ~0°).
-# Belt→asphalt: peak µ scaled by TIRE_MU_ROAD_SCALE below; stiffnesses
-# and shapes carried over unscaled (standard practice).
-# Model: simplified Magic Formula + friction ellipse (separate µx).
-# ─────────────────────────────────────────────────────────────────────────
-# What:  belt→asphalt grip scaling. Calspan's sandpaper belt grips harder
-#        than track asphalt; common practice scales the fitted peak µ by
-#        ~0.65–0.70 for on-road prediction (stiffnesses/shapes carry over
-#        unscaled). 0.67 chosen; VALIDATE on skidpad — that measurement
-#        replaces this guess with the truth.
-# Unit:  dimensionless
-TIRE_MU_ROAD_SCALE = 0.67                        # PLACEHOLDER — skidpad validates
-
-# What:  peak LATERAL friction coefficient at the nominal load.
-# Unit:  dimensionless
-# From:  TTC Round 9 pooled fit (belt µ₀ = 2.593, surrogate spread ±6%)
-#        × road scale.
-TIRE_MU0 = TIRE_MU_ROAD_SCALE * 2.593            # TTC FIT R9 = 1.74 road
-
-# What:  peak LONGITUDINAL friction coefficient (drive/brake). The R20
-#        measures ~9% below its lateral peak; combined slip caps on the
-#        friction ELLIPSE in tire.py.
-# Unit:  dimensionless
-# From:  TTC Round 9 pooled drive/brake fit (belt 2.359) × road scale.
-TIRE_MU0_LONG = TIRE_MU_ROAD_SCALE * 2.359       # TTC FIT R9 = 1.58 road
-
-# What:  load sensitivity — how much the friction COEFFICIENT drops as
-#        vertical load rises: mu = MU0 * (1 - S_MU*(Fz/FZ_NOM - 1)).
-#        Shared by the lateral and longitudinal peaks.
-# Unit:  dimensionless
-TIRE_S_MU = 0.112                                # TTC FIT R9
-
-# What:  the "nominal" vertical load at which MU0 is defined — pick ≈ the
-#        static load on one tire.
-# Unit:  N
-TIRE_FZ_NOM = (CAR_MASS_NO_DRIVER + DRIVER_MASS) * G / 4.0   # DERIVED ≈ 593 N
-                                                 # (m·g/4 — follows the mass
-                                                 # entries above; was a
-                                                 # hardcoded 241.7)
-
-# What:  normalized cornering stiffness of a FRONT tire: lateral force per
-#        radian of slip angle, per newton of load (C_alpha = this * Fz).
-#        FSAE slicks: ~14–25 1/rad from TTC.
-# Unit:  1/rad
-TIRE_C_ALPHA_FRONT = 37.0                        # TTC FIT R9 (same tire all round)
-
-# What:  same, for a REAR tire.
-# Unit:  1/rad
-TIRE_C_ALPHA_REAR = 37.0                         # TTC FIT R9 (same tire all round)
-# NOTE: identical normalized stiffness front/rear makes the LINEAR
-# understeer gradient exactly zero (neutral) — balance now comes entirely
-# from load transfer, aero split, and tire load sensitivity.
-
-# What:  normalized longitudinal slip stiffness: drive/brake force per
-#        unit slip ratio per newton (C_kappa = this * Fz). TTC: ~20–40.
-# Unit:  1/unit-slip
-TIRE_C_KAPPA = 41.9                              # TTC FIT R9
-
-# What:  Magic Formula shape (C) and curvature (E) factors — how sharply
-#        force peaks and falls off past the peak. From the TTC fit.
-# Unit:  dimensionless
-TIRE_SHAPE_C_LAT = 1.397                         # TTC FIT R9  (C_y)
-TIRE_CURV_E_LAT = 0.365                          # TTC FIT R9  (E_y)
-TIRE_SHAPE_C_LONG = 1.705                        # TTC FIT R9  (C_x)
-TIRE_CURV_E_LONG = 0.389                         # TTC FIT R9  (E_x)
+class _Unresolved(Exception):
+    """A derived formula referenced something not loaded yet."""
 
 
-# ─────────────────────────────────────────────────────────────────────────
-# CONTROLLER GAINS — retuned 2026-08-29 against the report-based car
-# above (heavier wheel inertia, 273 N·m wheel torque, I_z = 70). Whenever
-# vehicle/tire numbers change meaningfully, retune again (run the three
-# maneuvers; oscillation = too hot, sluggish tracking = too cold).
-# ─────────────────────────────────────────────────────────────────────────
-# Software differential: PI on wheel-speed-difference error.
-KP_SDIFF = 15.0        # N·m per rad/s of wheel-speed error    TUNED (sim)
-KI_SDIFF = 60.0        # N·m per rad of accumulated error      TUNED (sim)
-I_SDIFF_MAX = 60.0     # N·m anti-windup clamp on the integral   TUNED (sim)
+def load(root=ROOT):
+    """Read every params.yaml and return the populated Config."""
+    cfg = Config()
+    files = _yaml_files(root)
+    if not files:
+        raise ConfigError(f"no params.yaml found under {root}/{{{','.join(SEARCH_DIRS)}}}")
 
-# What:  hard cap on how much torque the s-diff term may transfer between
-#        the wheels. Without it, an unbounded speed-difference PI dumps
-#        torque onto the loaded outer tire near the limit, burns its
-#        lateral grip (friction circle), and power-oversteers the car —
-#        the sim demonstrates exactly this if you raise the cap. The
-#        s-diff's job is trimming wheel speeds, not large torque moves.
-# Unit:  N·m
-DT_SDIFF_MAX = 80.0    # TUNED (sim)
+    pending = []        # derived entries, resolved after the plain values
+    for path in files:
+        rel = os.path.relpath(path, root)
+        with open(path, encoding="utf-8") as fh:
+            doc = yaml.safe_load(fh) or {}
+        namespace = doc.pop("namespace", None)
+        if not namespace:
+            raise ConfigError(f"{rel}: missing top-level 'namespace:'")
+        if namespace in cfg._files:
+            raise ConfigError(f"{rel}: namespace '{namespace}' already declared "
+                              f"by {cfg._files[namespace]}")
+        cfg._files[namespace] = rel
+        doc.pop("about", None)          # free-text file header, not a parameter
 
-# Torque vectoring: PI on yaw-rate error -> yaw moment.
-KP_TV = 2500.0         # N·m per rad/s of yaw-rate error       TUNED (sim)
-KI_TV = 1000.0         # N·m per rad of accumulated error      TUNED (sim)
-I_TV_MAX = 200.0       # N·m anti-windup clamp on the integral   TUNED (sim)
-MZ_MAX = 600.0         # N·m clamp on commanded yaw moment       TUNED (sim)
+        for key, entry in doc.items():
+            dotted = f"{namespace}.{key}"
+            where = f"{rel}:{key}"
+            _check_entry(entry, where)
+            record = dict(entry)
+            record["path"] = dotted
+            record["namespace"] = namespace
+            record["name"] = key
+            record["file"] = rel
+            cfg._meta[dotted] = record
+            if "derived" in entry:
+                pending.append((dotted, record, where))
+            else:
+                si = _to_si(entry["value"], entry["unit"], where)
+                record["si"] = si
+                cfg._place(namespace, key, si)
 
-# What:  the yaw-rate reference is capped at this fraction of the friction-
-#        limited lateral acceleration.
-# Unit:  dimensionless, 0..1
-AY_FRAC = 0.95         # TUNED (sim)
+    # Derived values, resolved by repeated passes so order in the files and
+    # across files does not matter. Each pass must resolve at least one.
+    while pending:
+        still = []
+        for dotted, record, where in pending:
+            try:
+                si = _eval_derived(record["derived"], cfg, where)
+            except _Unresolved:
+                still.append((dotted, record, where))
+                continue
+            if not isinstance(si, (int, float)):
+                raise ConfigError(f"{where}: derived formula produced "
+                                  f"{type(si).__name__}, expected a number")
+            record["si"] = si
+            record.setdefault("status", "DERIVED")
+            cfg._place(record["namespace"], record["name"], si)
+        if len(still) == len(pending):
+            names = ", ".join(d for d, _, _ in still)
+            raise ConfigError(
+                "derived parameters could not be resolved (circular reference, "
+                f"or a typo in a path): {names}"
+            )
+        pending = still
+
+    return cfg
 
 
-# ─────────────────────────────────────────────────────────────────────────
-# NUMERICAL GUARDS (not car data — leave alone unless the sim misbehaves)
-# ─────────────────────────────────────────────────────────────────────────
-# Minimum speed used in slip-angle/slip-ratio denominators. Unit: m/s.
-V_EPS = 0.5            # NUMERICAL GUARD
+# The loaded configuration. Import failures here are deliberate: a missing or
+# malformed params.yaml must stop the sim at import, not surface later as a
+# quietly wrong number.
+cfg = load()
 
-
-# ─────────────────────────────────────────────────────────────────────────
-# REPORT VALUES **NOT USED** BY THIS SIM (documented so nobody hunts for
-# them). This basic sim has no suspension/ride DOFs — the full-model team
-# needs these, we don't:
-#   sprung mass (180.9 kg), unsprung masses (7.4/7.4/7.8/7.8 kg),
-#   sprung-CG-to-axle distances (0.817/0.707 m), pitch inertia (64.46),
-#   roll inertia (15.34), suspension damping (1437.6/1644.4 N·s/m),
-#   tire VERTICAL stiffness (113 832 N/m), rolling-resistance coeff (0.02
-#   — rolling drag is deliberately omitted here).
-# Suspension spring rates (19.3/24.8) are used ONLY via their ratio, for
-# LAT_TRANSFER_FRAC_FRONT above.
-# ─────────────────────────────────────────────────────────────────────────
+# Two constants are used so widely that the physics modules import them by
+# name rather than through cfg.
+G = cfg.environment.g
+RHO_AIR = cfg.environment.rho_air

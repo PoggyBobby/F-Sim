@@ -1,0 +1,51 @@
+namespace: sensors.vcu
+
+about: >
+  The VCU itself — loop rate, the rules plausibility thresholds, and the noise
+  seed. Not a sensor, but the thing that reads all of them.
+
+rate_hz:
+  value:  100.0
+  unit:   Hz
+  symbol: "-"
+  status: PLACEHOLDER — ask software team
+  what: >
+    VCU control-loop rate — how often sensors are sampled and torque commands
+    are recomputed (physics still integrates at 4 kHz).
+  need:   The real VCU loop rate
+  how:    Software team
+  why: >
+    Gains proven stable at 100 Hz (verify.py section H); make it match reality
+    before quoting controller performance.
+
+plaus_apps_cut:
+  value:  25.0
+  unit:   "%"
+  symbol: "-"
+  status: RULES VALUE (EV.4.7)
+  what:   APPS percentage above which, while braking, motor power must be cut.
+  need:   "-"
+  how:    Rulebook (confirm current year)
+  why:    Implemented and unit-tested (verify I3); the pedal_check maneuver demonstrates it.
+
+plaus_apps_restore:
+  value:  5.0
+  unit:   "%"
+  symbol: "-"
+  status: RULES VALUE (EV.4.7)
+  what:   APPS percentage the pedal must fall below before power is restored.
+  need:   "-"
+  how:    Rulebook (confirm current year)
+  why:    The latch that makes the cut a latch and not a flicker.
+
+seed:
+  value:  2026
+  unit:   "-"
+  symbol: "-"
+  status: NUMERICAL GUARD (repeatability)
+  what: >
+    Seed for the sensor-noise generator — runs are exactly repeatable and all
+    four controller configs see IDENTICAL noise.
+  need:   "-"
+  how:    "-"
+  why:    Fair comparisons and reproducible runs.

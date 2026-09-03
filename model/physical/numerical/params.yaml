@@ -1,0 +1,16 @@
+namespace: numerical
+
+about: >
+  Not car data — solver guards. Leave alone unless the sim misbehaves.
+
+v_eps:
+  value:  0.5
+  unit:   m/s
+  symbol: v_eps
+  status: NUMERICAL GUARD
+  what:   Minimum speed used in slip-angle / slip-ratio denominators.
+  need:   "-"
+  how:    "-"
+  why: >
+    Below ~0.5 m/s wheel-slip math is untrustworthy — launches are out of scope
+    until reworked.

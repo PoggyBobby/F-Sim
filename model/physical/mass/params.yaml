@@ -1,0 +1,58 @@
+namespace: mass
+
+about: >
+  READ THIS BEFORE ENTERING ANYTHING. The sim wants mass WITHOUT driver and
+  DRIVER mass as two separate entries; total-with-driver is derived below,
+  never entered.
+
+  HISTORY (kept because it explains why earlier runs used 241.7 kg): until
+  2026-08-30 the total came from the report's single m_t = 241.7 kg, read as
+  car+driver, split 166.7 + 75. The report's own mass rows never added up
+  (sprung 180.9 + 2 x unsprung 30.4 = 241.7 — one row double-counts), and
+  166.7 kg was flagged as implausibly light. The team's real number below
+  supersedes all of that. Runs 001-010 ran at 241.7 kg total; runs from here
+  run at ~256 kg (+6%) — metrics across that boundary are not directly
+  comparable.
+
+car_no_driver:
+  value:  400.1
+  unit:   lb
+  display_unit: kg (weighed as 400.1 lb)
+  symbol: m_car
+  status: MEASURED 2026-08-31 (corner scales)
+  what:   Complete ready-to-run vehicle, nobody in the seat.
+  need:   Total car weight
+  how: >
+    Corner scales (E-Z Weight Intercomp SW500), no driver:
+    LF 87.5 lb, RF 86.3 lb (front pair 173.8 lb = 43.44%);
+    LR 114.8 lb, RR 111.5 lb (rear pair 226.3 lb); total 400.1 lb,
+    left 50.56%, cross (RF+LR) 50.26%. Left/right is 0.56% asymmetric
+    (~1 kg heavier left) — the sim assumes perfect L/R symmetry; at that
+    size the error is noise. Cross weight is a setup number this sim does
+    not use; recorded for the suspension crew.
+  why:    With driver mass it sets EVERY inertial and grip force in the sim.
+
+driver:
+  value:  156.0
+  unit:   lb
+  display_unit: kg (entered as 156 lb)
+  symbol: m_driver
+  status: CURRENT CAR (team)
+  what: >
+    Driver in full gear (suit, helmet, shoes). Convention: use the HEAVIEST
+    regular driver for conservative tuning.
+  need:   Suited driver weight
+  how:    Bathroom scale, fully suited
+  why: >
+    The car never runs without one. Confirm 156 lb is the heaviest driver and
+    includes gear (~5-8 lb).
+
+total:
+  derived: mass.car_no_driver + mass.driver
+  unit:   kg
+  symbol: m_total
+  status: DERIVED (car + driver, never entered directly)
+  what:   Total vehicle mass with the driver seated.
+  need:   "—"
+  how:    = m_car + m_driver
+  why:    The mass every inertial term in the equations of motion uses.

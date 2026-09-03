@@ -1,0 +1,93 @@
+namespace: geometry
+
+about: >
+  Whole-vehicle geometry and CG. The sim is a single rigid body, so these are
+  vehicle values, not sprung-mass values.
+
+wheelbase:
+  value:  1.52
+  unit:   m
+  symbol: L
+  status: FROM REPORT (2023 car)
+  what:   Front-axle to rear-axle centerline distance.
+  need:   Axle-center to axle-center distance
+  how:    Tape measure / CAD
+  why:    Sets yaw geometry, the bicycle-model reference, and CG position math.
+  note: >
+    Report L_f + L_r = 0.64 + 0.88. The report's sprung-CG distances sum to
+    1.524 — 4 mm off; the vehicle-CG pair is used here.
+
+track_front:
+  value:  1.34
+  unit:   m
+  symbol: t_f
+  status: FROM REPORT
+  what: >
+    Front track width — distance between the CENTERS of the two front tire
+    contact patches (NOT outside-to-outside of the tires).
+  need:   Center-of-tire to center-of-tire, front
+  how:    Tape measure / CAD
+  why:    Lever arm for front lateral load transfer.
+
+track_rear:
+  value:  1.34
+  unit:   m
+  symbol: t_r
+  status: FROM REPORT
+  what:   Rear track width, same definition as front.
+  need:   Center-of-tire to center-of-tire, rear
+  how:    Tape measure / CAD
+  why: >
+    THE torque-vectoring lever arm: Mz = (t_r/2)*dFx. Bigger track = more yaw
+    per N*m of split.
+
+weight_fraction_front:
+  value:  0.4344
+  unit:   "-"
+  display_unit: 0-1
+  symbol: pct_front
+  status: MEASURED 2026-08-31 (scales, NO driver — redo seated)
+  what: >
+    Static front weight fraction = front axle weight / total weight. By
+    statics this equals (CG-to-REAR-axle distance)/wheelbase.
+  need: >
+    Front axle share WITH DRIVER SEATED (expect ~1-2% lower than the 43.44%
+    car-only number, so roughly 41.5-43%)
+  how:    Repeat the corner-scale session with the driver in the seat
+  why: >
+    Decides how much grip each axle owns — understeer/oversteer balance starts
+    here.
+  note: >
+    Corner scales 2026-08-31, NO driver: (87.5+86.3)/400.1 = 43.44% front —
+    finally replaces the old report's self-contradictory 46%/58%. ONE STEP
+    LEFT: the sim runs WITH a driver, and a seated driver's CG sits aft of
+    mid-wheelbase, so the true with-driver front share is lower. Using the
+    car-only measurement until the team repeats the weighing seated.
+
+h_cg:
+  value:  0.23
+  unit:   m
+  symbol: h
+  status: FROM REPORT
+  what:   Height of the center of gravity above the ground.
+  need:   CG height
+  how:    Tilt test (weigh one axle while lifting the other) or CAD
+  why: >
+    Drives ALL load transfer — every grip shift in braking, accel and
+    cornering is proportional to h.
+  note: >
+    Report h = 0.23 m is strictly the SPRUNG-mass CG height, but with unsprung
+    CGs at wheel-center height (~0.20 m) the whole-vehicle value works out to
+    ~0.226 m, so 0.23 is fine as-is.
+
+I_z:
+  value:  70.38
+  unit:   kg*m^2
+  symbol: I_z
+  status: FROM REPORT
+  what: >
+    Yaw moment of inertia of the whole vehicle about the vertical axis through
+    the CG. Sets how fast yaw rate responds to the TV yaw moment.
+  need:   Yaw moment of inertia
+  how:    CAD mass model (practical) or trifilar pendulum test
+  why:    Directly in Iz*rdot = sum(Mz) — how fast the car answers a yaw moment.

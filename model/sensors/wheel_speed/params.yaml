@@ -1,0 +1,18 @@
+namespace: sensors.wheel_speed
+
+about: >
+  WSS. There is NO separate wheel-speed sensor on this car: "wheel speed" is
+  the MOTOR shaft speed reported by the AMK resolver over CAN, which the VCU
+  divides by the upright planetary ratio.
+
+quant_rpm:
+  value:  1.0
+  unit:   rpm/LSB
+  symbol: "-"
+  status: PLACEHOLDER — AMK CAN resolution
+  what:   Motor-speed resolution over CAN (motor side, before the planetary divide).
+  need:   AMK CAN speed resolution
+  how:    AMK CAN spec
+  why: >
+    1 motor rpm is about 1.8 mm/s of ground speed — the resolver-over-CAN path
+    is effectively noise-free wheel speed.

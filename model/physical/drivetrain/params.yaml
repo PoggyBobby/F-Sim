@@ -1,0 +1,154 @@
+namespace: drivetrain
+
+about: >
+  Wheels, gearing, motors and the power limits.
+
+  Layout (team-confirmed 2026-08-30): FOUR motors fitted, one per wheel (hub
+  drive, planetary reduction in each upright) — the TWO REAR ones are active in
+  the current build, 4WD is the goal. This sim models the active 2-motor rear
+  axle; the 4WD extension is described in README.md.
+
+  Motors: AMK "Racing Kit" A2370DD (DD5-type synchronous servo) with
+  KW26-S5-FSE-4Q inverters — see docs/datasheets/AMK Racing Kit Datasheet.pdf
+  (kit manual; exact motor data sheet: Motor_data_sheet_A2370DD_DD5).
+
+tire_outer_diameter:
+  value:  18.0
+  unit:   in
+  display_unit: m (18 in OD)
+  symbol: d_w
+  status: CURRENT CAR (18in tire OD, 10in rim)
+  what:   Outer diameter of the fitted tire. wheel_radius is derived from it.
+  need:   Confirmed tire size
+  how:    Tire sidewall / team spec
+  why:    The rim size does not enter the sim — only the tire's rolling radius does.
+
+wheel_radius:
+  derived: drivetrain.tire_outer_diameter / 2.0
+  unit:   m
+  display_unit: m (18 in OD / 2)
+  symbol: r_w
+  status: CURRENT CAR
+  what:   LOADED tire radius — ground to axle center with the car's weight on the tire.
+  need:   Axle-center height, car on the ground
+  how:    Ruler to the axle center
+  why: >
+    Converts wheel torque to drive force (F = T/r) and wheel speed to ground
+    speed. Loaded radius is a few mm less than free radius (tire squish) —
+    measure axle-center height with the car on the ground to refine.
+
+gear_ratio:
+  value:  13.0
+  unit:   "-"
+  symbol: gr
+  status: FROM REPORT — confirm upright planetary ratio
+  what: >
+    Total reduction between motor shaft and wheel (motor revs per wheel rev).
+    With one motor PER WHEEL this is the PLANETARY gear stage packaged in each
+    upright with the motor — not a chain or gearbox.
+  need:   The planetary's reduction ratio
+  how:    Ask powertrain / count gear teeth in CAD
+  why: >
+    Wheel torque = motor torque * gr; reflected rotor inertia = rotor J * gr^2.
+    The 21 N*m motor is useless without it — direct drive would give 92 N of
+    drive force per wheel (0.08 g) and a 479 m/s speed match.
+  note: >
+    Old report gr = 13 (typical AMK-kit planetaries run 12-14.5:1). DESIGN
+    CHOICE, not inherited.
+
+motor_torque_peak:
+  value:  21.0
+  unit:   N*m
+  symbol: T_pk
+  status: CURRENT CAR (AMK kit datasheet)
+  what:   Peak torque of ONE motor at its shaft (before the gear reduction).
+  need:   Nothing (datasheet value)
+  how:    AMK kit manual 6.5.3 torque curve; dyno confirms someday
+  why:    x13 gear = 273 N*m per wheel — the ceiling every torque command lives under.
+
+pack_voltage:
+  value:  380.0
+  unit:   V
+  symbol: V_DC
+  status: CURRENT CAR (design decision 2026-08-30)
+  what:   Accumulator (HV pack) nominal voltage.
+  need:   Nothing (design value)
+  how:    Accumulator design
+  why: >
+    Not used directly by the physics — it SETS motor peak power below.
+    4 motors x ~20 kW at 380 V = 80 kW exactly (the 4WD end state); the current
+    2-rear build tops out at ~40 kW, so the 80 kW cap is unreachable until 4WD.
+
+motor_power_peak:
+  value:  20000.0
+  unit:   W
+  symbol: P_pk
+  status: DERIVED (kit curves scaled to 380 V)
+  what:   Peak mechanical power of ONE motor at OUR pack voltage.
+  need:   Actual peak power at 380 V
+  how:    Read the 380 V curve in the AMK manual; dyno pull once the pack exists
+  why: >
+    Caps torque above ~17 m/s (37 mph): at 40 mph only 256 of 273 N*m is
+    available. The 2-rear build tops out around 40 kW.
+  note: >
+    AMK kit manual 6.5.3 — peak power rides on HV voltage. Curves give ~26 kW
+    at 500 VDC and ~32 kW at 600 VDC. Scaled to the 380 V pack three ways:
+    26*(380/500) = 19.8 kW, 32*(380/600) = 20.3 kW, base-speed method
+    21 N*m * (13 krpm*380/600) = 18.1 kW -> 20 kW adopted.
+
+motor_max_speed:
+  value:  20000
+  unit:   rpm
+  display_unit: rad/s (entered as 20,000 rpm)
+  symbol: n_max
+  status: CURRENT CAR (AMK kit datasheet)
+  what:   Maximum motor shaft speed.
+  need:   Nothing (datasheet value)
+  how:    AMK kit manual 6.5.3 (characteristics end at 20,000 rpm)
+  why: >
+    ~36 m/s (80 mph) ground speed at 13:1 — comfortably above the 40 mph
+    envelope, not the limiter. NOT enforced by this basic sim; recorded for
+    completeness and future top-speed studies.
+
+I_wheel:
+  value:  0.35
+  unit:   kg*m^2
+  symbol: I_w
+  status: DERIVED estimate — replace with CAD
+  what: >
+    Spin inertia of ONE rear corner about the axle: tire + rim + brake rotor +
+    hub + (motor rotor inertia * gear_ratio^2).
+  need:   Rotating inertia of one corner
+  how:    CAD mass properties + rotor J from the exact AMK motor sheet
+  why: >
+    Sets how fast an unloaded wheel spins up — the s-diff's whole problem.
+    Controller gains are sensitive to it: retune when it changes.
+  note: >
+    Estimate = tire+rim+hub ~0.30 (guess for an 18in tire on a 10in rim) +
+    rotor inertia * gear^2 ~ 2.74e-4 * 13^2 ~ 0.05. The old report's
+    I_w = 3.033 was rejected: ~10x too large for one corner.
+
+power_cap_total:
+  value:  80000.0
+  unit:   W
+  symbol: P_max
+  status: RULES VALUE (simplified)
+  what:   FSAE EV rules limit on total drive power (EV.4.2, 80 kW at the accumulator).
+  need:   Nothing (rulebook)
+  how:    Confirm in the current-year rulebook
+  why: >
+    Hard ceiling. The sim applies it to mechanical power (no drivetrain losses
+    modeled) — the real car hits it ~10-15% earlier.
+
+regen_speed_cutoff:
+  value:  1.4
+  unit:   m/s
+  display_unit: m/s (~5 km/h)
+  symbol: "-"
+  status: RULES VALUE (approx.)
+  what:   Below this speed no negative (regen) torque is commanded.
+  need:   Nothing (rulebook)
+  how:    Confirm in the current-year rulebook
+  why: >
+    Rules restrict regen near standstill; also keeps the sim's low-speed slip
+    math out of its untrustworthy zone.

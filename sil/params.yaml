@@ -1,0 +1,18 @@
+namespace: sil
+
+about: >
+  Software-in-the-loop: running the real SRE-VCU firmware binary as a fifth
+  controller config. See sil/vcu_sil.py and the sil/ Makefile.
+
+boot_s:
+  value:  1.5
+  unit:   s
+  symbol: "-"
+  status: PLACEHOLDER — from main.c / initializations.c
+  what: >
+    How long the real firmware is left to boot — bench check (55 ms) plus the
+    ADC settle loop (1 s) — before a maneuver's t = 0, measured on the
+    firmware's own clock.
+  need:   The firmware's true settle time
+  how:    Read main.c / initializations.c, or instrument the boot
+  why:    Too short and the first samples come from an unsettled ADC.
