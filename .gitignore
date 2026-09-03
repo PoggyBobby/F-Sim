@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+.python-version
+
+# C / VCU build artifacts (controller ports to C)
+*.o
+*.obj
+*.a
+*.so
+*.elf
+*.bin
+*.hex
+controller_build/
+
+
+# IDE / OS
+.vscode/
+*.swp
+*.swo

@@ -10,7 +10,6 @@ This repo serves as the bringup software the first three revisions of torque vec
     Using a PI controller to optimize the yaw moment of the vehicle
 4. Traction/load-aware TV
 
-
 ## Directory Structure
 ```
 tests/
@@ -34,5 +33,5 @@ model/
 
 controllers/
 
-
+debugger/
 ```
