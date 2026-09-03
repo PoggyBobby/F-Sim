@@ -236,3 +236,144 @@ def ideal_corner(vp: VehicleParams, tp_f: TireParams, tp_r: TireParams,
         "entry brake pressure (regen map) [bar]": bps_bar,
         "entry braking distance from top speed [m]": dist,
     }
+
+
+# ───────────────────────────────────────────────────────────── the report
+def _fmt(v):
+    if isinstance(v, str):
+        return v
+    if isinstance(v, tuple):
+        return "–".join(f"{x:.2f}" for x in v)
+    if v is None or (isinstance(v, float) and not np.isfinite(v)):
+        return "–"
+    if abs(v) < 5e-4:
+        v = 0.0
+    if abs(v) >= 100 or float(v).is_integer():
+        return f"{v:.0f}"
+    return f"{v:.3f}"
+
+
+def write_report(run_dir, maneuvers, all_results, vp, tp_f, tp_r):
+    """REPORT.md (+ ideal.csv) in the run folder. maneuvers: objects with
+    .slug/.name/.description/.params; all_results: {slug: {config:
+    {"log", "metrics"}}}."""
+    esc = lambda x: str(x).replace("|", r"\|")
+    L = ["# Torque-allocation report — plan Step 4", ""]
+    L.append("Four numbers per mode per corner (see `outputs.py`): **exit ax** "
+             "= mean longitudinal accel in the 1.5 s after the throttle step "
+             "(higher = more power down) · **peak inner κ** = inner-rear slip "
+             "from the step on (lower; past the tire peak ≈ 0.10 is waste) · "
+             "**yaw RMSE** = tracking error vs the driver's reference (lower) "
+             "· **inner regen** = energy dragged out of the inner wheel "
+             "(lower; large = the tune drags instead of caps). Rank = sum of "
+             "per-column ranks; a spun run ranks last.")
+    L.append("")
+
+    overall = {}
+    for man in maneuvers:
+        res = all_results.get(man.slug)
+        if not res:
+            continue
+        L.append(f"## {man.name} — {man.description}")
+        L.append("")
+        L.append("| rank | config | " + " | ".join(esc(c) for c in STEP4_COLS)
+                 + " | inner | exit window [s] | spun? |")
+        L.append("|---" * (len(STEP4_COLS) + 5) + "|")
+        for rank, (name, score, rk) in enumerate(rank_configs(res), 1):
+            m = res[name]["metrics"]
+            s4 = step4_metrics(res[name]["log"])
+            overall[name] = overall.get(name, 0) + rank
+            cells = [f"{_fmt(m.get(c))} ({rk[c]})" for c in STEP4_COLS]
+            L.append(f"| **{rank}** | {name} | " + " | ".join(cells)
+                     + f" | {s4['inner side']} | {_fmt(s4['exit window [s]'])} | "
+                     f"{'no' if m.get('finished', True) else '**YES**'} |")
+        L.append("")
+
+    if overall:
+        L.append("## Overall — rank summed over every test (lower = better)")
+        L.append("")
+        L.append("| config | summed rank |")
+        L.append("|---|---|")
+        for name, s in sorted(overall.items(), key=lambda kv: kv[1]):
+            L.append(f"| {name} | {s} |")
+        L.append("")
+
+    # ideal sheet for every maneuver that carries corner geometry
+    ideal_rows = []
+    for man in maneuvers:
+        p = getattr(man, "params", {}) or {}
+        if "radius_m" not in p:
+            continue
+        row = ideal_corner(vp, tp_f, tp_r, p["radius_m"], p.get("corner_deg"),
+                           p.get("entry_frac", 0.9))
+        ideal_rows.append((man.slug, row))
+    if ideal_rows:
+        L.append("## Ideal inputs / outputs per corner (from `car_data.py` only)")
+        L.append("")
+        L.append("Steady-state, no slip: what the steering, wheel speeds and "
+                 "torques *should* be. The torque ceilings are the plan's "
+                 "point in one row: **open 50/50** is limited by 2× what the "
+                 "unloaded inner wheel can take; an **ideal split** gets the "
+                 "sum of both wheels. Brake numbers assume limit decel from "
+                 f"{V_TOP_MPS:.1f} m/s; BPS commands regen only, the rest is "
+                 "mechanical.")
+        L.append("")
+        keys = list(ideal_rows[0][1].keys())
+        L.append("| quantity | " + " | ".join(esc(s) for s, _ in ideal_rows) + " |")
+        L.append("|---" * (len(ideal_rows) + 1) + "|")
+        for k in keys:
+            L.append(f"| {esc(k)} | " + " | ".join(_fmt(r[k]) for _, r in ideal_rows) + " |")
+        L.append("")
+        with open(os.path.join(run_dir, "ideal.csv"), "w", newline="",
+                  encoding="utf-8") as fh:
+            w = csv.writer(fh)
+            w.writerow(["maneuver"] + keys)
+            for slug, r in ideal_rows:
+                w.writerow([slug] + [r[k] for k in keys])
+
+    path = os.path.join(run_dir, "REPORT.md")
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(L) + "\n")
+    return path
+
+
+# ─────────────────────────────────────────────── recompute from a run dir
+class _Man:
+    def __init__(self, slug, d):
+        self.slug, self.name = slug, d.get("name", slug)
+        self.description, self.params = d.get("description", ""), d.get("params", {})
+
+
+def report_from_run_dir(run_dir):
+    """Rebuild REPORT.md for a finished run from manifest.json + data/*.csv
+    (200 Hz CSVs, so numbers differ in the last digit from the live run).
+    Uses the CURRENT car_data.py for the ideal sheet."""
+    from sim import metrics as base_metrics
+    from runlog import _slug
+    run_dir = os.path.realpath(run_dir)
+    with open(os.path.join(run_dir, "manifest.json"), encoding="utf-8") as fh:
+        man = json.load(fh)
+    vp, tp_f, tp_r, _ = default_setup()
+    cfg_by_slug = {_slug(c): c for c in man.get("controller_configs", [])}
+    maneuvers, all_results = [], {}
+    for slug, d in man.get("maneuvers", {}).items():
+        mo = _Man(slug, d)
+        res = {}
+        for cslug, cname in cfg_by_slug.items():
+            f = os.path.join(run_dir, "data", f"{slug}__{cslug}.csv")
+            if not os.path.exists(f):
+                continue
+            arr = np.genfromtxt(f, delimiter=",", names=True)
+            log = {k: np.asarray(arr[k]) for k in arr.dtype.names}
+            m = base_metrics(log, vp)
+            m["finished"] = bool(log["t"][-1] >= d.get("duration_s", 0) - 0.02)
+            res[cname] = {"log": log, "metrics": m}
+        if res:
+            maneuvers.append(mo)
+            all_results[slug] = res
+    return write_report(run_dir, maneuvers, all_results, vp, tp_f, tp_r)
+
+
+if __name__ == "__main__":
+    target = sys.argv[1] if len(sys.argv) > 1 else os.path.join("runs", "latest")
+    print("wrote", report_from_run_dir(target))
