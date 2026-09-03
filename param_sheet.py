@@ -28,7 +28,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-import car_data as cd
+from model.config import cfg  # was: import car_data as cd
 
 OUT = "FSAE-Sim Parameters.xlsx"
 

@@ -33,13 +33,13 @@ import sys
 
 import numpy as np
 
-from params import VehicleParams, TireParams, ControlParams, default_setup, G, RHO_AIR
-from tire import MagicFormulaTire
-from vehicle import (VehicleModel, front_steer_angles, NSTATES, IX, IY, IPSI,
+from model.params import VehicleParams, TireParams, ControlParams, default_setup, G, RHO_AIR
+from model.physical.tires.tire import MagicFormulaTire
+from model.physical.vehicle import (VehicleModel, front_steer_angles, NSTATES, IX, IY, IPSI,
                      IVX, IVY, IR, IWRL, IWRR)
-from controllers import TorqueSplitController, make_configs
-from maneuvers import Maneuver, step_steer, corner_exit, slalom
-from sim import simulate, metrics, rk4_step
+from controllers.python.torque_split import TorqueSplitController, make_configs
+from model.maneuvers.maneuvers import Maneuver, step_steer, corner_exit, slalom
+from model.sim import simulate, metrics, rk4_step
 
 FAIL = []
 RESULTS = []
@@ -643,8 +643,8 @@ def section_h():
 
 # ═══════════════════════ I. sensor stack (sensors.py)
 def section_i():
-    import car_data as cdd
-    from sensors import (SensorSuite, DriverAdapter, steer_map_deg,
+    from model.config import cfg  # was: import car_data as cdd
+    from model.sensors import (SensorSuite, DriverAdapter, steer_map_deg,
                          steer_map_inv_deg)
     vp, tp_f, tp_r, cp = default_setup()
 
@@ -665,13 +665,13 @@ def section_i():
     s = [0.0] * NSTATES
     s[IVX] = 15.0
     s[IWRL], s[IWRR] = 60.0, 70.0
-    from sensors import DriverInputs
+    from model.sensors import DriverInputs
     sr = sen.measure(s, DriverInputs(), {"ax": 0, "ay": 0}, 0.01, False)
     check("I2", "WSS: motor rpm → wheel speed chain exact (quantization off)",
           abs(sr.wheel_speed_RL - 60.0) < 1e-12 and
           abs(sr.wheel_speed_RR - 70.0) < 1e-12,
           f"RL {sr.wheel_speed_RL:.6f}, RR {sr.wheel_speed_RR:.6f} rad/s")
-    lsb = cdd.WSS_QUANT_RPM * (math.pi / 30) / vp.gear_ratio
+    lsb = cfg.sensors.wheel_speed.quant_rpm * (math.pi / 30) / vp.gear_ratio
     info("I2", "WSS quantization at the wheel",
          f"1 motor-rpm LSB = {lsb * vp.r_wheel * 1000:.1f} mm/s of ground speed "
          "— the resolver-over-CAN path is effectively noise-free")
@@ -679,7 +679,7 @@ def section_i():
     # I3: EV.4.7 plausibility latch — unit-tested against the rule text.
     ctrl = make_configs(vp, tp_f, tp_r, cp)[0]
     ctrl.reset()
-    from sensors import SensorReadings
+    from model.sensors import SensorReadings
     def step(apps, bps):
         sr = SensorReadings(apps_pct=apps, bps_bar=bps, vx_est=10.0)
         sr.wheel_speed_RL = sr.wheel_speed_RR = 10.0 / vp.r_wheel

@@ -39,7 +39,7 @@ from datetime import datetime
 
 import numpy as np
 
-import car_data as cd
+from model.config import cfg  # was: import car_data as cd
 
 RUNS_DIR = "runs"
 

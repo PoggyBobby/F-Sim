@@ -20,8 +20,8 @@ and reported (summary()) so the link is visibly alive.
 import os
 import subprocess
 
-import car_data as cd
-from controllers import ControllerDebug
+from model.config import cfg  # was: import car_data as cd
+from controllers.python.torque_split import ControllerDebug
 
 SIL_EXE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                        "sil", "build", "vcu_sil")
@@ -47,7 +47,7 @@ class VcuProcess:
                                      stderr=subprocess.PIPE, text=True,
                                      bufsize=1)
         self.t_vcu = 0.0
-        while self.t_vcu < cd.VCU_SIL_BOOT_S:       # let the firmware boot
+        while self.t_vcu < cfg.sil.boot_s:       # let the firmware boot
             self.exchange(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
     def exchange(self, t, apps_pct, bps_bar, handwheel_deg, rpm_RL, rpm_RR,

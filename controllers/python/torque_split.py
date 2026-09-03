@@ -59,8 +59,8 @@ Two update paths exist:
 
 import math
 from dataclasses import dataclass, field
-from params import VehicleParams, TireParams, ControlParams, G, RHO_AIR
-from vehicle import IVX, IR, IWRL, IWRR
+from model.params import VehicleParams, TireParams, ControlParams, G, RHO_AIR
+from model.physical.vehicle import IVX, IR, IWRL, IWRR
 
 
 @dataclass
@@ -161,25 +161,25 @@ class TorqueSplitController:
           * torque request from APPS/BPS through the pedal map, gated by
             the FSAE EV.4.7 plausibility check.
         """
-        import car_data as cd
+        from model.config import cfg  # was: import car_data as cd
 
         # pedal map + rules plausibility (EV.4.7): >25% APPS while braking
         # cuts motor power; restored only when APPS falls below 5%.
-        braking = sr.bps_bar > cd.BPS_ACTUATED_BAR
-        if sr.apps_pct > cd.PLAUS_APPS_CUT and braking:
+        braking = sr.bps_bar > cfg.sensors.brake_pressure_sens.actuated_bar
+        if sr.apps_pct > cfg.sensors.vcu.plaus_apps_cut and braking:
             self.plaus_cut = True
-        elif self.plaus_cut and sr.apps_pct < cd.PLAUS_APPS_RESTORE:
+        elif self.plaus_cut and sr.apps_pct < cfg.sensors.vcu.plaus_apps_restore:
             self.plaus_cut = False
 
         if self.plaus_cut:
             T_req = 0.0
         elif braking:
-            T_req = -cd.T_REGEN_MAX * min(sr.bps_bar / cd.BPS_RANGE_BAR, 1.0)
+            T_req = -cfg.sensors.brake_pressure_sens.t_regen_max * min(sr.bps_bar / cfg.sensors.brake_pressure_sens.range_bar, 1.0)
         else:
             T_req = 2.0 * self.vp.T_wheel_max * sr.apps_pct / 100.0
 
         # pseudo-state holding ONLY what the sensors gave us
-        from vehicle import NSTATES, IVX, IR, IWRL, IWRR
+        from model.physical.vehicle import NSTATES, IVX, IR, IWRL, IWRR
         ps = [0.0] * NSTATES
         ps[IVX] = sr.vx_est
         ps[IR] = sr.yaw_rate

@@ -79,7 +79,7 @@ def corner_exit(delta_deg=8.0, vx0=10.0, t_ramp0=1.5, t_ramp1=3.0,
     rear grip, and no left/right split fixes an axle that is past its total
     limit (that needs traction control, deliberately out of scope here)."""
     if T_max_total is None:
-        from params import VehicleParams
+        from model.params import VehicleParams
         T_max_total = 0.45 * 2.0 * VehicleParams().T_wheel_max
     d = math.radians(delta_deg)
 

@@ -12,7 +12,7 @@ and RK4 needs a few steps per time constant to stay accurate.
 
 import math
 import numpy as np
-from vehicle import VehicleModel, NSTATES, IX, IY, IPSI, IVX, IVY, IR, IWRL, IWRR
+from model.physical.vehicle import VehicleModel, NSTATES, IX, IY, IPSI, IVX, IVY, IR, IWRL, IWRR
 
 
 def rk4_step(model, s, delta, T_RL, T_RR, dt, k1=None):
@@ -41,12 +41,12 @@ def simulate(model: VehicleModel, controller, maneuver, dt=2.5e-4, log_every=4,
                     physics steps = the VCU rate, held (ZOH) in between.
     The PLANT inputs are identical in both modes — only what the controller
     KNOWS changes."""
-    import car_data as cd
+    from model.config import cfg  # was: import car_data as cd
     p = model.p
     controller.reset()
     adapter = None
     if sensors is not None:
-        from sensors import DriverAdapter
+        from model.sensors import DriverAdapter
         sensors.reset()
         adapter = DriverAdapter(p)
 
@@ -80,7 +80,7 @@ def simulate(model: VehicleModel, controller, maneuver, dt=2.5e-4, log_every=4,
             else:
                 pedals = maneuver.pedals(t) if maneuver.pedals else None
                 drv = adapter.inputs(delta, T_req, pedals)
-                braking = drv.bps_bar > cd.BPS_ACTUATED_BAR
+                braking = drv.bps_bar > cfg.sensors.brake_pressure_sens.actuated_bar
                 sr = sensors.measure(s, drv, last_info, dt * ctrl_every,
                                      braking)
                 dbg = controller.update_from_sensors(sr, dt * ctrl_every)

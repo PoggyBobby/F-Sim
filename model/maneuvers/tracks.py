@@ -37,11 +37,11 @@ Recorded per test (Maneuver.params, so runs can never be confused):
 import math
 from dataclasses import dataclass, replace
 
-import car_data as cd
-from maneuvers import Maneuver, _ramp
-from params import VehicleParams, G, RHO_AIR
-from tire import MagicFormulaTire
-from vehicle import VehicleModel, IVX, IPSI
+from model.config import cfg  # was: import car_data as cd
+from model.maneuvers.maneuvers import Maneuver, _ramp
+from model.params import VehicleParams, G, RHO_AIR
+from model.physical.tires.tire import MagicFormulaTire
+from model.physical.vehicle import VehicleModel, IVX, IPSI
 
 # ── the catalog ──────────────────────────────────────────────────────────
 # slug -> (corner angle [deg], default radii [m]). Radii are chosen so the
@@ -69,7 +69,7 @@ WHEEL_INDEX = {"FL": 0, "FR": 1, "RL": 2, "RR": 3}
 def entry_speed(radius, mu=None, frac=DEFAULT_ENTRY_FRAC):
     """Corner entry speed: frac · √(µ g R). µ defaults to the tire's
     nominal LATERAL peak from car_data.py (the number the plan means)."""
-    mu = cd.TIRE_MU0 if mu is None else mu
+    mu = cfg.tires.mu0 if mu is None else mu
     return frac * math.sqrt(mu * G * radius)
 
 

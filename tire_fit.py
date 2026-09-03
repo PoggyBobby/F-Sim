@@ -198,8 +198,8 @@ def main():
     a = ap.parse_args()
 
     if a.fznom is None:
-        import car_data as cd
-        a.fznom = cd.TIRE_FZ_NOM
+        from model.config import cfg  # was: import car_data as cd
+        a.fznom = cfg.tires.Fz_nom
     os.makedirs(a.out, exist_ok=True)
 
     lat = stack(sum([glob.glob(p) for p in a.cornering], []), a.units)

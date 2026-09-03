@@ -22,14 +22,14 @@ import time
 
 import matplotlib
 
-from params import default_setup
-from tire import MagicFormulaTire
-from vehicle import VehicleModel
-from controllers import make_configs
-from maneuvers import step_steer, corner_exit, slalom, pedal_check
-from tracks import track_maneuvers, model_for, CORNER_TYPES
-import tracks as _tracks
-from sim import run_matrix, print_table
+from model.params import default_setup
+from model.physical.tires.tire import MagicFormulaTire
+from model.physical.vehicle import VehicleModel
+from controllers.python.torque_split import make_configs
+from model.maneuvers.maneuvers import step_steer, corner_exit, slalom, pedal_check
+from model.maneuvers.tracks import track_maneuvers, model_for, CORNER_TYPES
+import model.maneuvers.tracks as _tracks
+from model.sim import run_matrix, print_table
 from style import RC, CONFIG_COLORS, REF_COLOR, config_lw, config_z
 from runlog import RunRecorder
 
@@ -361,19 +361,19 @@ def main():
     if args.sil:
         if args.perfect_state:
             ap.error("--sil needs the sensor stack; drop --perfect-state")
-        from vcu_sil import SilController, SIL_NAME
+        from sil.vcu_sil import SilController, SIL_NAME
         config_names.append(SIL_NAME)
 
     # sensor stack: the controller reads WSS/IMU/SAS/APPS/BPS at the VCU
     # rate — the default since 2026-08-31 (--perfect-state to bypass)
-    import car_data as cd
+    from model.config import cfg  # was: import car_data as cd
     dt = 2.5e-4
     if args.perfect_state:
         sensors, ctrl_every = None, 1
     else:
-        from sensors import SensorSuite
+        from model.sensors import SensorSuite
         sensors = SensorSuite(vp)
-        ctrl_every = max(1, int(round(1.0 / (dt * cd.VCU_RATE_HZ))))
+        ctrl_every = max(1, int(round(1.0 / (dt * cfg.sensors.vcu.rate_hz))))
 
     rec = RunRecorder(label=args.label, note=args.note, csv_hz=args.csv_hz,
                       runs_dir=args.runs_dir,
@@ -382,7 +382,7 @@ def main():
                                     "animated": bool(args.animate),
                                     "sensor_stack": not args.perfect_state,
                                     "sil": bool(args.sil),
-                                    "vcu_rate_hz": (cd.VCU_RATE_HZ
+                                    "vcu_rate_hz": (cfg.sensors.vcu.rate_hz
                                                     if not args.perfect_state
                                                     else "physics rate")})
     run_dir = rec.begin(maneuvers, config_names)
@@ -395,7 +395,7 @@ def main():
     print("  feedback: " + ("PERFECT STATE (sensor stack bypassed)"
                             if args.perfect_state else
                             f"sensor stack (WSS/IMU/SAS/APPS/BPS) at "
-                            f"{cd.VCU_RATE_HZ:g} Hz VCU rate"))
+                            f"{cfg.sensors.vcu.rate_hz:g} Hz VCU rate"))
     print(f"  run {rec.run_number:03d} '{rec.label}' -> {run_dir}\n")
 
     plots, replays, tables = [], [], {}
