@@ -97,8 +97,8 @@ def corner_exit(delta_deg=8.0, vx0=10.0, t_ramp0=1.5, t_ramp1=3.0,
 
 
 def slalom(delta_deg=4.0, freq_hz=0.5, vx0=15.0, T_hold=55.0, duration=6.0):
-    """Sinusoidal steering — transient handling / TV tracking through
-    repeated direction changes."""
+    """Sinusoidal steering — transient handling through repeated direction
+    changes."""
     d = math.radians(delta_deg)
 
     def f(t):

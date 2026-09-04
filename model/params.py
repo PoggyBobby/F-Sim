@@ -121,11 +121,6 @@ class ControlParams:
     ki_sdiff: float = cfg.controllers.ki_sdiff
     i_sdiff_max: float = cfg.controllers.i_sdiff_max
     dT_sdiff_max: float = cfg.controllers.dt_sdiff_max
-    kp_tv: float = cfg.controllers.kp_tv
-    ki_tv: float = cfg.controllers.ki_tv
-    i_tv_max: float = cfg.controllers.i_tv_max
-    Mz_max: float = cfg.controllers.mz_max
-    ay_frac: float = cfg.controllers.ay_frac
 
 
 def default_setup():

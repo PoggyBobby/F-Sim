@@ -34,24 +34,21 @@ import numpy as np
 from model.params import G
 from model.physical.vehicle import front_steer_angles
 from style import (CONFIG_COLORS, STATUS_CRITICAL, SPIN_KAPPA_FALLBACK,
-                   REF_COLOR, INK, INK_2, MUTED, ASPHALT, SURFACE,
+                   INK, INK_2, MUTED, ASPHALT, SURFACE,
                    config_lw, config_z)
 
 # body-frame channels resampled onto the animation's time grid
-CHANNELS = ("X", "Y", "psi", "delta", "kRL", "kRR", "r", "r_ref", "vx",
+CHANNELS = ("X", "Y", "psi", "delta", "kRL", "kRR", "r", "vx",
             "T_RL", "T_RR")
 
 # direct-label placement per config, in units of the camera half-window, so
-# the four labels stay readable (and apart) at any zoom level
+# the labels stay readable (and apart) at any zoom level
 LABEL_OFFSETS = {
     "open (50/50)": (0.0, 0.20),
     "s-diff": (0.26, -0.16),
-    "TV": (-0.26, -0.16),
-    "s-diff + TV": (0.0, -0.30),
     "VCU (SIL)": (0.0, 0.34),
 }
-SHORT_NAMES = {"open (50/50)": "open", "s-diff": "s-diff", "TV": "TV",
-               "s-diff + TV": "s-diff + TV", "VCU (SIL)": "VCU"}
+SHORT_NAMES = {"open (50/50)": "open", "s-diff": "s-diff", "VCU (SIL)": "VCU"}
 
 
 def _rot(pts, ang):
@@ -206,8 +203,6 @@ def animate_maneuver(plt, maneuver, results, vp, tire_rear, outpath, fps=30,
         ax_slip.plot(log["t"], log["kRL"], color=CONFIG_COLORS[name],
                      lw=config_lw(name) - 0.4, zorder=config_z(name))
         k_peak_seen = max(k_peak_seen, float(np.max(np.abs(log["kRL"]))))
-    ref = results[names[-1]]["log"]
-    ax_yaw.plot(ref["t"], ref["r_ref"], "--", color=REF_COLOR, lw=1.5, zorder=1)
 
     # only stretch the slip axis up to the spin threshold when a wheel got
     # anywhere near it — otherwise the real trace would be squashed flat
@@ -231,8 +226,6 @@ def animate_maneuver(plt, maneuver, results, vp, tire_rear, outpath, fps=30,
                for n in names]
     handles.append(Line2D([], [], color=STATUS_CRITICAL, lw=3,
                           label=f"rear wheel spinning (|κ| > {k_spin:.2f})"))
-    handles.append(Line2D([], [], color=REF_COLOR, lw=1.6, ls="--",
-                          label="yaw-rate reference"))
     fig.legend(handles=handles, loc="lower center", ncol=6, fontsize=9,
                bbox_to_anchor=(0.5, 0.0))
 

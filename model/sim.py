@@ -61,8 +61,8 @@ def simulate(model: VehicleModel, controller, maneuver, dt=2.5e-4, log_every=4,
 
     log = {k: [] for k in
            ("t", "X", "Y", "psi", "vx", "vy", "r", "wRL", "wRR",
-            "delta", "T_req", "T_RL", "T_RR", "r_ref", "dw_target",
-            "dT_sdiff", "dT_tv", "beta", "ay", "ax",
+            "delta", "T_req", "T_RL", "T_RR", "dw_target",
+            "dT_sdiff", "beta", "ay", "ax",
             "kRL", "kRR", "FzFL", "FzFR", "FzRL", "FzRR", "P_total",
             "vx_est", "r_meas", "apps", "bps", "handwheel", "plaus_cut")}
 
@@ -98,8 +98,8 @@ def simulate(model: VehicleModel, controller, maneuver, dt=2.5e-4, log_every=4,
             log["wRL"].append(s[IWRL]); log["wRR"].append(s[IWRR])
             log["delta"].append(delta); log["T_req"].append(T_req)
             log["T_RL"].append(dbg.T_RL); log["T_RR"].append(dbg.T_RR)
-            log["r_ref"].append(dbg.r_ref); log["dw_target"].append(dbg.dw_target)
-            log["dT_sdiff"].append(dbg.dT_sdiff); log["dT_tv"].append(dbg.dT_tv)
+            log["dw_target"].append(dbg.dw_target)
+            log["dT_sdiff"].append(dbg.dT_sdiff)
             log["beta"].append(math.atan2(s[IVY], max(s[IVX], 0.5)))
             log["ay"].append(info["ay"]); log["ax"].append(info["ax"])
             log["kRL"].append(info["kappa"][2]); log["kRR"].append(info["kappa"][3])
@@ -134,8 +134,6 @@ def metrics(log, p):
     """Scalar summary of one run — used for the comparison table."""
     dw_act = log["wRR"] - log["wRL"]
     out = {
-        # how well the body followed the driver's implied yaw-rate request
-        "yaw RMSE [rad/s]": float(np.sqrt(np.mean((log["r_ref"] - log["r"]) ** 2))),
         # body sideslip: big values = the rear stepping out
         "max |beta| [deg]": float(np.degrees(np.max(np.abs(log["beta"])))),
         # how well the rear wheel-speed difference matched corner geometry
@@ -162,7 +160,7 @@ def run_matrix(model, controllers, maneuver, dt=2.5e-4, sensors=None,
 
 
 def print_table(maneuver, results):
-    cols = ["yaw RMSE [rad/s]", "max |beta| [deg]", "dw RMSE [rad/s]",
+    cols = ["max |beta| [deg]", "dw RMSE [rad/s]",
             "max |kappa| [-]", "max |ay| [g]"]
     name_w = max(len(n) for n in results) + 2
     print(f"\n=== {maneuver.name}  ({maneuver.description}) ===")
