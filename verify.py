@@ -456,6 +456,50 @@ def section_f():
          "shrinking yaw authority at high speed (finding #3). Real motors do "
          "this too — but the sim should REPORT it, not hide it")
 
+    # F8: open-loop s-diff mirrors sdiff.c. Settled multipliers at full
+    # LEFT lock, computed by hand from the YAML constants:
+    #   f = 1 - k_derate (floored at f_min),  g_in = 1 - k_inner,  g_out = 1
+    #   RL (inner) = T_base*f*g_in,  RR (outer) = T_base*f
+    s = [0.0] * NSTATES
+    s[IVX] = 10.0
+    s[IWRL] = s[IWRR] = 10.0 / vp.r_wheel
+    ctrl.reset()
+    for _ in range(200):                     # 2 s at 10 ms — slew fully settled
+        d = ctrl.update(s, +cp.delta_max, 200.0, 0.01)
+    f_exp = max(1.0 - cp.k_derate, cp.f_min)
+    RL_exp = 100.0 * f_exp * (1.0 - cp.k_inner)
+    RR_exp = 100.0 * f_exp
+    check("F8", "s-diff full LEFT lock: inner=RL derated, outer=RR budget only",
+          abs(d.T_RL - RL_exp) < 1e-9 and abs(d.T_RR - RR_exp) < 1e-9,
+          f"RL {d.T_RL:.2f} / RR {d.T_RR:.2f} vs expected {RL_exp:.2f} / {RR_exp:.2f} N·m")
+
+    # F9: mirror — full RIGHT lock swaps the sides exactly.
+    ctrl.reset()
+    for _ in range(200):
+        d = ctrl.update(s, -cp.delta_max, 200.0, 0.01)
+    check("F9", "s-diff full RIGHT lock: mirror of F8",
+          abs(d.T_RR - RL_exp) < 1e-9 and abs(d.T_RL - RR_exp) < 1e-9,
+          f"RL {d.T_RL:.2f} / RR {d.T_RR:.2f}")
+
+    # F10: inside the deadband there is NO inner/outer split — but the
+    # friction budget f still applies (sdiff.c gates only g_left/g_right on
+    # DEADBAND, not f). Both sides equal, both = T_base * f.
+    ctrl.reset()
+    for _ in range(200):
+        d = ctrl.update(s, 0.5 * cp.deadband, 200.0, 0.01)
+    f_db = max(1.0 - cp.k_derate * (0.5 * cp.deadband / cp.delta_max), cp.f_min)
+    check("F10", "s-diff inside deadband: equal sides, budget-only derate",
+          abs(d.T_RL - d.T_RR) < 1e-12 and abs(d.T_RL - 100.0 * f_db) < 1e-9,
+          f"RL {d.T_RL:.2f} / RR {d.T_RR:.2f} (f = {f_db:.4f}, no L/R split)")
+
+    # F11: slew actually limits — one 10 ms step from straight toward full
+    # lock may move f by at most rate*dt.
+    ctrl.reset()
+    d = ctrl.update(s, +cp.delta_max, 200.0, 0.01)
+    check("F11", "s-diff slew: one step moves f by <= rate*dt",
+          abs(d.f_applied - (1.0 - cp.rate * 0.01)) < 1e-9,
+          f"f after one step {d.f_applied:.4f} (limit {1.0 - cp.rate * 0.01:.4f})")
+
 
 # ═══════════════════════ G. in-run invariant audit (standard maneuvers)
 class AuditModel(VehicleModel):

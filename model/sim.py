@@ -62,7 +62,8 @@ def simulate(model: VehicleModel, controller, maneuver, dt=2.5e-4, log_every=4,
     log = {k: [] for k in
            ("t", "X", "Y", "psi", "vx", "vy", "r", "wRL", "wRR",
             "delta", "T_req", "T_RL", "T_RR", "dw_target",
-            "dT_sdiff", "beta", "ay", "ax",
+            "dT_sdiff", "delta_norm", "f_applied", "g_left_appl", "g_right_appl",
+            "beta", "ay", "ax",
             "kRL", "kRR", "FzFL", "FzFR", "FzRL", "FzRR", "P_total",
             "vx_est", "r_meas", "apps", "bps", "handwheel", "plaus_cut")}
 
@@ -100,6 +101,8 @@ def simulate(model: VehicleModel, controller, maneuver, dt=2.5e-4, log_every=4,
             log["T_RL"].append(dbg.T_RL); log["T_RR"].append(dbg.T_RR)
             log["dw_target"].append(dbg.dw_target)
             log["dT_sdiff"].append(dbg.dT_sdiff)
+            log["delta_norm"].append(dbg.delta_norm); log["f_applied"].append(dbg.f_applied)
+            log["g_left_appl"].append(dbg.g_left_appl); log["g_right_appl"].append(dbg.g_right_appl)
             log["beta"].append(math.atan2(s[IVY], max(s[IVX], 0.5)))
             log["ay"].append(info["ay"]); log["ax"].append(info["ax"])
             log["kRL"].append(info["kappa"][2]); log["kRR"].append(info["kappa"][3])

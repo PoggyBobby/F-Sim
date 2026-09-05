@@ -10,7 +10,7 @@ car, edit the YAML file next to the component:
     model/physical/drivetrain/params.yaml  wheels, gearing, motors, limits
     model/physical/aero/params.yaml        C_L, C_D, area, balance
     model/physical/tires/params.yaml       Magic Formula coefficients
-    controllers/python/params.yaml         the tuned gains
+    controllers/python/params.yaml         the s-diff constants
 
 This file only defines:
   * the dataclass containers the rest of the code passes around,
@@ -113,14 +113,19 @@ class TireParams:
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# Controller gains — controllers/python/params.yaml; retune on real data
+# Controller constants — controllers/python/params.yaml
 # ─────────────────────────────────────────────────────────────────────────
 @dataclass
 class ControlParams:
-    kp_sdiff: float = cfg.controllers.kp_sdiff
-    ki_sdiff: float = cfg.controllers.ki_sdiff
-    i_sdiff_max: float = cfg.controllers.i_sdiff_max
-    dT_sdiff_max: float = cfg.controllers.dt_sdiff_max
+    # open-loop s-diff (sdiff.c) — see controllers/python/params.yaml
+    steering_ratio: float = cfg.controllers.steering_ratio
+    delta_max: float = cfg.controllers.delta_max
+    k_derate: float = cfg.controllers.k_derate
+    k_inner: float = cfg.controllers.k_inner
+    f_min: float = cfg.controllers.f_min
+    deadband: float = cfg.controllers.deadband
+    rate: float = cfg.controllers.rate
+    torque_clamp_Nm: float = cfg.controllers.torque_clamp_Nm
 
 
 def default_setup():
