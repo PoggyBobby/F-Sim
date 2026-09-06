@@ -109,7 +109,7 @@ UNITS = {
     "m/s": 1.0, "mph": MPH, "km/h": 1.0 / 3.6,
     # force / torque / power / pressure
     "N": 1.0, "N*m": 1.0, "lbft": LBFT,
-    "N*m/rad": 1.0, "N*m/(rad/s)": 1.0,
+    "N*m/rad": 1.0, "N*m/A": 1.0,"N*m/(rad/s)": 1.0,
     "W": 1.0, "hp": HP,
     "bar": 1.0, "V": 1.0,
     # composite / dimensionless

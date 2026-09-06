@@ -72,6 +72,25 @@ motor_torque_peak:
   how:    AMK kit manual 6.5.3 torque curve; dyno confirms someday
   why:    x13 gear = 273 N*m per wheel — the ceiling every torque command lives under.
 
+motor_kt:
+  label:  "Motor torque constant"
+  value:  0.2
+  unit:   N*m/A
+  symbol: Kt
+  status: PLACEHOLDER — UNMEASURED; AMK-era motor numbers above may not apply to the in-hub motors
+  what:   Shaft torque per amp of motor (q-axis) current. Turns a VESC current command into torque.
+  need:   The in-hub motor's Kt
+  how: >
+    Motor datasheet, or once VESC status frames are parsed: measured wheel
+    torque / (reported motor current x gear ratio). Cross-check against
+    motor_torque_peak / peak current.
+  why: >
+    The ONLY number that makes the VCU's milliamp command mean anything in the
+    sim: T_wheel = I[A] * Kt * gear_ratio. At 0.2 the firmware's 125 A
+    full-throttle command asks for 325 N*m per wheel, above the 273 N*m peak.
+
+
+
 pack_voltage:
   label:  "Pack voltage"
   value:  380.0

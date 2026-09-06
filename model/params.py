@@ -56,6 +56,7 @@ class VehicleParams:
     I_wheel: float = cfg.drivetrain.I_wheel
     gear_ratio: float = cfg.drivetrain.gear_ratio
     motor_T_peak: float = cfg.drivetrain.motor_torque_peak
+    motor_kt: float = cfg.drivetrain.motor_kt
     motor_P_peak: float = cfg.drivetrain.motor_power_peak
     P_total_max: float = cfg.drivetrain.power_cap_total
     regen_speed_cutoff: float = cfg.drivetrain.regen_speed_cutoff
