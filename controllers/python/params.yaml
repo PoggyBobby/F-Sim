@@ -11,7 +11,7 @@ about: >
 
 steering_ratio:
   label:  "Steering ratio (handwheel : road-wheel)"
-  value:  3.2
+  value:  5.4
   unit:   "-"
   symbol: STEERING_RATIO
   status: CURRENT CAR (team steering chart, near-center value)
@@ -22,9 +22,9 @@ steering_ratio:
 
 delta_max:
   label:  "Max road-wheel steering angle"
-  value:  0.4049
+  value:  2.0
   unit:   rad
-  display_unit: 23.2 deg
+  display_unit: 114.6 deg
   symbol: DELTA_MAX
   status: CURRENT CAR (team steering chart, full lock)
   what:   Normalizes steer angle to 0-1 in sdiff.c (delta_norm).
@@ -34,7 +34,7 @@ delta_max:
 
 k_derate:
   label:  "Friction-budget derate gain"
-  value:  0.3
+  value:  0.25
   unit:   "-"
   symbol: K_DERATE
   status: PLACEHOLDER — UNMEASURED, DO NOT FLASH
@@ -45,7 +45,7 @@ k_derate:
 
 k_inner:
   label:  "Inner-wheel extra derate gain"
-  value:  0.2
+  value:  0.35
   unit:   "-"
   symbol: K_INNER
   status: PLACEHOLDER — UNMEASURED, DO NOT FLASH
@@ -56,7 +56,7 @@ k_inner:
 
 f_min:
   label:  "Friction-budget floor"
-  value:  0.4
+  value:  0.5
   unit:   "-"
   symbol: F_MIN
   status: PLACEHOLDER — UNMEASURED
@@ -67,9 +67,9 @@ f_min:
 
 deadband:
   label:  "Steering deadband"
-  value:  0.0175
+  value:  1.0
   unit:   rad
-  display_unit: 1.0 deg
+  display_unit: 57.3 deg
   symbol: DEADBAND
   status: PLACEHOLDER — UNMEASURED
   what:   Steering angle band around center treated as "straight" (no inner/outer split).
@@ -79,7 +79,7 @@ deadband:
 
 rate:
   label:  "Slew rate"
-  value:  4.0
+  value:  1.0
   unit:   Hz
   symbol: RATE
   status: PLACEHOLDER — UNMEASURED
