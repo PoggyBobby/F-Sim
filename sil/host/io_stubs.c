@@ -1,8 +1,10 @@
 /* Host stand-ins for the TTTech HY-TTC 60 IO library (lib/xc2000_ttc60.lib).
  *
  * Only the functions the firmware actually calls are provided. Every one
- * of them succeeds (IO_E_OK), outputs read as zero and "fresh", writes are
- * accepted and dropped. The one piece of behaviour that is NOT a no-op is
+ * of them succeeds (IO_E_OK). The pedal, brake, steering and LV battery
+ * ADC channels, the buttons/HVIL digital inputs and a fake BMS on CAN are
+ * served from the sim's sensor frame (sil_in); everything else reads as
+ * zero and "fresh", writes are accepted and dropped. The one piece of behaviour that is NOT a no-op is
  * the real-time clock: IO_Driver_TaskEnd() advances it by one VCU cycle,
  * and every IO_RTC_GetTimeUS() poll by 1 µs, so the firmware's own
  * `while (IO_RTC_GetTimeUS(start) < N)` pacing loops terminate — after one
@@ -24,10 +26,12 @@
 #include "IO_POWER.h"
 #include "IO_CAN.h"
 #include "IO_UART.h"
+#include <string.h>
 
 #include "sil_link.h"
 
-#define SIL_CYCLE_US 10000UL   /* the firmware's main-loop period */
+#define SIL_CYCLE_US 10000UL 
+#define SIL_BPS_RANGE_BAR 100.0  /* the firmware's main-loop period */
 #define SIL_POLL_US  1UL       /* time a busy-wait poll is taken to cost */
 
 static ubyte4 rtc_now_us = 0;
@@ -92,8 +96,19 @@ IO_ErrorType IO_DI_DeInit(ubyte1 di_channel)
 
 IO_ErrorType IO_DI_Get(ubyte1 di_channel, bool *const di_value)
 {
-    (void)di_channel;
-    *di_value = FALSE;
+    /* Buttons are on 10k pull-ups (initializations.c): TRUE = not pressed.
+     * Reading FALSE for the Eco button means "held" and after 3 s the
+     * firmware starts a throttle calibration that zeroes torque for 5 s.
+     * HVIL (DI_07) is a pull-down: TRUE = loop closed. */
+    switch (di_channel) {
+    case IO_DI_01:                      /* Eco / calibration button */
+    case IO_DI_02:                      /* TV button */
+    case IO_DI_03:                      /* DRS button */
+    case IO_DI_07:                      /* HVIL termination sense */
+        *di_value = TRUE; break;
+    default:
+        *di_value = FALSE; break;
+    }
     return IO_E_OK;
 }
 
@@ -113,14 +128,32 @@ IO_ErrorType IO_ADC_ChannelDeInit(ubyte1 adc_channel)
     return IO_E_OK;
 }
 
+static ubyte2 span(double frac, ubyte2 lo, ubyte2 hi)
+{
+    if (frac < 0.0) frac = 0.0;
+    if (frac > 1.0) frac = 1.0;
+    return (ubyte2)(lo + frac * (hi - lo) + 0.5);
+}
+
 IO_ErrorType IO_ADC_Get(ubyte1 adc_channel, ubyte2 *const adc_value,
                         bool *const fresh)
 {
-    (void)adc_channel;
-    *adc_value = 0;
+    double apps = sil_in.apps_pct / 100.0;
+    double bps  = sil_in.bps_bar / SIL_BPS_RANGE_BAR;
+    switch (adc_channel) {
+    case IO_ADC_5V_06: *adc_value = span(apps, 400, 1400);  break;  /* TPS0, P149 */
+    case IO_ADC_5V_01: *adc_value = span(apps, 1800, 4000); break;  /* TPS1, P140 */
+    case IO_ADC_5V_07: *adc_value = span(bps, 450, 4500);   break;  /* BPS0, P137 */
+    case IO_ADC_5V_04:                                              /* SAS,  P150 */
+        /* sensorCalculations.c steering_degrees(): 960..2560 mV <-> -90..+90 deg */
+        *adc_value = span((sil_in.handwheel_deg + 90.0) / 180.0, 960, 2560); break;
+    case IO_ADC_UBAT:  *adc_value = 26000; break;                  /* LV battery, mV: healthy 24 V pack */
+    default:           *adc_value = 0; break;
+    }
     *fresh = TRUE;
     return IO_E_OK;
 }
+
 
 /* ── PWM outputs / pulse inputs ────────────────────────────────────── */
 IO_ErrorType IO_PWM_Init(ubyte1 pwm_channel, ubyte2 frequency, bool polarity,
@@ -199,11 +232,27 @@ IO_ErrorType IO_CAN_ConfigFIFO(ubyte1 *const handle, ubyte1 channel,
     return IO_E_OK;
 }
 
+static void can_frame(IO_CAN_DATA_FRAME *f, ubyte4 id, const ubyte1 *d, ubyte1 n)
+{
+    memset(f, 0, sizeof *f);
+    memcpy(f->data, d, n);
+    f->length = n;
+    f->id_format = IO_CAN_STD_FRAME;
+    f->id = id;
+}
+
 IO_ErrorType IO_CAN_ReadFIFO(ubyte1 handle, IO_CAN_DATA_FRAME *const buffer,
                              ubyte1 buffer_size, ubyte1 *const rx_frames)
 {
-    (void)handle; (void)buffer; (void)buffer_size;
+    static const ubyte1 safety[8]    = {0};      
+    static const ubyte1 precharge[1] = {0x02};   
+    (void)handle;
     *rx_frames = 0;
+    if (buffer_size >= 2) {
+        can_frame(&buffer[0], 0x600, safety, 8);
+        can_frame(&buffer[1], 0x625, precharge, 1);
+        *rx_frames = 2;
+    }
     return IO_E_OK;
 }
 

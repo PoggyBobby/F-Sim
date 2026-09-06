@@ -1,0 +1,32 @@
+Host build only — the firmware never marks the throttle calibrated.
+
+TorqueEncoder_update() forces travelPercent = 0 while me->calibrated is
+FALSE. The on-car calibration routine (Eco button held 3 s -> calibrateTPS)
+is commented out in main.c, and the four tps*_calib* bounds main.c declares
+at lines 218-221 are never handed to the TorqueEncoder. In the SIL harness
+there is no button to hold, so the pedal the sim feeds in is thrown away
+and every current command is 0 A.
+
+Pre-load those same bounds and set calibrated = TRUE in TorqueEncoder_new().
+Ask the VCU team how the car gets a calibrated pedal today; if the answer
+is "a calibration routine", this patch goes away once the harness can
+drive that routine instead.
+
+--- a/torqueEncoder.c	2026-09-05 15:57:19
++++ b/torqueEncoder.c	2026-09-05 15:57:19
+@@ -36,7 +36,14 @@
+     me->tps1->specMin = 2500; // Target 0% = ~2650
+     me->tps1->specMax = 4900; // Target 100% = ~4700
+ 
+-    me->calibrated = FALSE;
++    // SIL: the calibration routine and its button are commented out in
++    // main.c, so nothing ever sets calibrated = TRUE and travelPercent is
++    // forced to 0. Pre-load the bounds main.c declares (and never uses).
++    me->tps0_calibMin = 400;
++    me->tps0_calibMax = 1400;
++    me->tps1_calibMin = 1800;
++    me->tps1_calibMax = 4000;
++    me->calibrated = TRUE;
+ 
+     return me;
+ }

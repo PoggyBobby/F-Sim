@@ -113,8 +113,13 @@ class SilController:
         self.cycles[mode] = self.cycles.get(mode, 0) + 1
         self.cmd_max[mode] = max(self.cmd_max.get(mode, 0),
                                  abs(cmd_RL), abs(cmd_RR))
-        return ControllerDebug()        # T_RL = T_RR = 0: no command→torque
-                                        # model yet (duty / mA, not N·m)
+        k = self.vp.motor_kt * self.vp.gear_ratio / 1000.0   # N·m per mA at the wheel
+        T_max = self.vp.T_wheel_max
+        dbg = ControllerDebug()
+        dbg.dw_target = sr.yaw_rate * self.vp.track_r / self.vp.r_wheel   # diagnostic only
+        dbg.T_RL = max(-T_max, min(T_max, cmd_RL * k))
+        dbg.T_RR = max(-T_max, min(T_max, cmd_RR * k))
+        return dbg
 
     def summary(self):
         parts = []
@@ -124,4 +129,4 @@ class SilController:
             parts.append(f"{MODE_NAMES[mode]} x{n}"
                          + (f" ({unit[mode]})" if mode in unit else ""))
         return ("VCU command frames per cycle: " + ", ".join(parts)
-                + " — torque to plant = 0 (no command→torque model yet)")
+                + f" — torque to plant = mA x Kt x gear ({self.vp.motor_kt} N·m/A x {self.vp.gear_ratio:g}), clipped to ±{self.vp.T_wheel_max:.0f} N·m")

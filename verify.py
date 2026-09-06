@@ -321,8 +321,8 @@ def section_d():
     # the exactly mirrored trajectory — catches ANY left/right sign error.
     man_l = step_steer(delta_deg=+5.0)
     man_r = step_steer(delta_deg=-5.0)
-    ctrl_l = make_configs(vp, tp_f, tp_r, cp)[3]    # s-diff + TV (everything on)
-    ctrl_r = make_configs(vp, tp_f, tp_r, cp)[3]
+    ctrl_l = make_configs(vp, tp_f, tp_r, cp)[1]    # s-diff
+    ctrl_r = make_configs(vp, tp_f, tp_r, cp)[1]
     log_l = simulate(model, ctrl_l, man_l, dt=2.5e-4)
     log_r = simulate(model, ctrl_r, man_r, dt=2.5e-4)
     errs = {
@@ -351,10 +351,10 @@ def section_d():
     man = corner_exit()
     outs = []
     for dt in (2.5e-4, 1.25e-4, 6.25e-5):
-        c = make_configs(vp, tp_f, tp_r, cp)[3]
+        c = make_configs(vp, tp_f, tp_r, cp)[1]
         lg = simulate(model, c, man, dt=dt, log_every=max(1, int(1e-3 / dt)))
         outs.append((lg["r"][-1], lg["X"][-1], lg["Y"][-1],
-                     metrics(lg, vp)["yaw RMSE [rad/s]"]))
+                     metrics(lg, vp)["dw RMSE [rad/s]"]))
     d12 = max(abs((outs[0][i] - outs[1][i])) for i in range(4))
     d23 = max(abs((outs[1][i] - outs[2][i])) for i in range(4))
     check("D4", "RK4 dt-refinement converged (dt, dt/2, dt/4)",
@@ -401,29 +401,11 @@ def section_e():
               f"r_sim {r_sim:.4f} vs bicycle {r_bike:.4f} rad/s "
               f"({(r_sim / r_bike - 1) * 100:+.1f}%)")
 
-    # E2: with the DEFAULT car (aero on), quantify how far the controller's
-    # r_ref is from the true steady state it will chase — its K_us uses
-    # static loads, but downforce raises both axle stiffnesses.
-    vp2, tpf2, tpr2, cp2 = default_setup()
-    model2 = VehicleModel(vp2, MagicFormulaTire(tpf2), MagicFormulaTire(tpr2))
-    d = math.radians(2.0)
-    man = Maneuver("ss2", "ss2", 6.0, 15.0,
-                   lambda t: (d if t > 0.5 else 0.0, 60.0))
-    ctrl = make_configs(vp2, tpf2, tpr2, cp2)[0]
-    log = simulate(model2, ctrl, man, dt=2.5e-4)
-    i0 = int(0.9 * len(log["t"]))
-    r_true = log["r"][i0:].mean()
-    r_ref = ctrl.yaw_rate_ref(log["vx"][i0:].mean(), d)
-    info("E2", "TV reference vs true steady state (default car, 0.5 g)",
-         f"r_ref {r_ref:.4f} vs open-loop steady r {r_true:.4f} rad/s "
-         f"({(r_ref / r_true - 1) * 100:+.1f}%) — the gap is what TV works "
-         "against; comes from static-load K_us + linear-tire assumptions")
-
 
 # ═══════════════════════════════════ F. controller limit unit tests
 def section_f():
     vp, tp_f, tp_r, cp = default_setup()
-    ctrl = make_configs(vp, tp_f, tp_r, cp)[3]
+    ctrl = make_configs(vp, tp_f, tp_r, cp)[1]
     Tmax = vp.T_wheel_max
 
     # F1: no limits active — pure split.
@@ -474,21 +456,49 @@ def section_f():
          "shrinking yaw authority at high speed (finding #3). Real motors do "
          "this too — but the sim should REPORT it, not hide it")
 
-    # F8: the TV moment→ΔT conversion against an independent chain:
-    # ΔFx = ΔT/r_w applied at ±track/2 → Mz. Round-trip must be identity.
-    Mz = 300.0
-    dT = 2.0 * Mz * vp.r_wheel / vp.track_r
-    Mz_back = (vp.track_r / 2.0) * (dT / vp.r_wheel)
-    check("F8", "Mz → ΔT → Mz round trip is exact",
-          abs(Mz_back - Mz) < 1e-12, f"{Mz:.0f} → ΔT {dT:.1f} N·m → {Mz_back:.0f}")
+    # F8: open-loop s-diff mirrors sdiff.c. Settled multipliers at full
+    # LEFT lock, computed by hand from the YAML constants:
+    #   f = 1 - k_derate (floored at f_min),  g_in = 1 - k_inner,  g_out = 1
+    #   RL (inner) = T_base*f*g_in,  RR (outer) = T_base*f
+    s = [0.0] * NSTATES
+    s[IVX] = 10.0
+    s[IWRL] = s[IWRR] = 10.0 / vp.r_wheel
+    ctrl.reset()
+    for _ in range(200):                     # 2 s at 10 ms — slew fully settled
+        d = ctrl.update(s, +cp.delta_max, 200.0, 0.01)
+    f_exp = max(1.0 - cp.k_derate, cp.f_min)
+    RL_exp = 100.0 * f_exp * (1.0 - cp.k_inner)
+    RR_exp = 100.0 * f_exp
+    check("F8", "s-diff full LEFT lock: inner=RL derated, outer=RR budget only",
+          abs(d.T_RL - RL_exp) < 1e-9 and abs(d.T_RR - RR_exp) < 1e-9,
+          f"RL {d.T_RL:.2f} / RR {d.T_RR:.2f} vs expected {RL_exp:.2f} / {RR_exp:.2f} N·m")
 
-    # F9: yaw-rate reference is capped by friction and saturates smoothly.
-    r1 = ctrl.yaw_rate_ref(15.0, math.radians(5.0))
-    r2 = ctrl.yaw_rate_ref(15.0, math.radians(25.0))
-    ay_cap = cp.ay_frac * ctrl.mu_ref * (G + 0.5 * RHO_AIR * vp.ClA * 225 / vp.m_total)
-    check("F9", "r_ref never asks for more than ay_frac·mu·g_eff",
-          abs(r2 * 15.0) <= ay_cap + 1e-9 and r2 >= r1,
-          f"r_ref(25°)·vx = {r2 * 15:.2f} vs cap {ay_cap:.2f} m/s²")
+    # F9: mirror — full RIGHT lock swaps the sides exactly.
+    ctrl.reset()
+    for _ in range(200):
+        d = ctrl.update(s, -cp.delta_max, 200.0, 0.01)
+    check("F9", "s-diff full RIGHT lock: mirror of F8",
+          abs(d.T_RR - RL_exp) < 1e-9 and abs(d.T_RL - RR_exp) < 1e-9,
+          f"RL {d.T_RL:.2f} / RR {d.T_RR:.2f}")
+
+    # F10: inside the deadband there is NO inner/outer split — but the
+    # friction budget f still applies (sdiff.c gates only g_left/g_right on
+    # DEADBAND, not f). Both sides equal, both = T_base * f.
+    ctrl.reset()
+    for _ in range(200):
+        d = ctrl.update(s, 0.5 * cp.deadband, 200.0, 0.01)
+    f_db = max(1.0 - cp.k_derate * (0.5 * cp.deadband / cp.delta_max), cp.f_min)
+    check("F10", "s-diff inside deadband: equal sides, budget-only derate",
+          abs(d.T_RL - d.T_RR) < 1e-12 and abs(d.T_RL - 100.0 * f_db) < 1e-9,
+          f"RL {d.T_RL:.2f} / RR {d.T_RR:.2f} (f = {f_db:.4f}, no L/R split)")
+
+    # F11: slew actually limits — one 10 ms step from straight toward full
+    # lock may move f by at most rate*dt.
+    ctrl.reset()
+    d = ctrl.update(s, +cp.delta_max, 200.0, 0.01)
+    check("F11", "s-diff slew: one step moves f by <= rate*dt",
+          abs(d.f_applied - (1.0 - cp.rate * 0.01)) < 1e-9,
+          f"f after one step {d.f_applied:.4f} (limit {1.0 - cp.rate * 0.01:.4f})")
 
 
 # ═══════════════════════ G. in-run invariant audit (standard maneuvers)
@@ -535,7 +545,7 @@ def section_g():
     Tmax = vp.T_wheel_max
 
     for man in (step_steer(), corner_exit(), slalom()):
-        for ci in (0, 3):                       # worst cases: open & everything-on
+        for ci in (0, 1):                       # open & s-diff
             audit.reset_audit()
             ctrl = make_configs(vp, tp_f, tp_r, cp)[ci]
             log = simulate(audit, ctrl, man, dt=2.5e-4)
@@ -587,7 +597,7 @@ def simulate_ctrl_rate(model, controller, maneuver, dt, ctrl_every):
     s = [0.0] * NSTATES
     s[IVX] = maneuver.vx0
     s[IWRL] = s[IWRR] = maneuver.vx0 / p.r_wheel
-    log = {k: [] for k in ("t", "r", "r_ref", "dw_target", "wRL", "wRR",
+    log = {k: [] for k in ("t", "r", "dw_target", "wRL", "wRR",
                            "kRL", "kRR", "beta", "vx")}
     T_RL = T_RR = 0.0
     dbg = None
@@ -601,7 +611,7 @@ def simulate_ctrl_rate(model, controller, maneuver, dt, ctrl_every):
         if k % 4 == 0:
             log["t"].append(t)
             log["r"].append(s[IR]); log["vx"].append(s[IVX])
-            log["r_ref"].append(dbg.r_ref); log["dw_target"].append(dbg.dw_target)
+            log["dw_target"].append(dbg.dw_target)
             log["wRL"].append(s[IWRL]); log["wRR"].append(s[IWRR])
             log["kRL"].append(inf_["kappa"][2]); log["kRR"].append(inf_["kappa"][3])
             log["beta"].append(math.atan2(s[IVY], max(s[IVX], 0.5)))
@@ -617,25 +627,23 @@ def section_h():
     man = corner_exit()
     rows = []
     for hz, every in (("4 kHz (as simulated)", 1), ("1 kHz", 4), ("100 Hz", 40)):
-        ctrl = make_configs(vp, tp_f, tp_r, cp)[3]
+        ctrl = make_configs(vp, tp_f, tp_r, cp)[1]
         log = simulate_ctrl_rate(model, ctrl, man, 2.5e-4, every)
-        yaw_rmse = float(np.sqrt(np.mean((log["r_ref"] - log["r"]) ** 2)))
         dw_rmse = float(np.sqrt(np.mean(
             (log["dw_target"] - (log["wRR"] - log["wRL"])) ** 2)))
         finished = log["t"][-1] >= man.duration - 0.01
-        rows.append((hz, yaw_rmse, dw_rmse, finished))
+        rows.append((hz, dw_rmse, finished))
     base = rows[0]
-    for hz, yr, dr, fin in rows:
-        info("H1", f"s-diff+TV at {hz}",
-             f"yaw RMSE {yr:.4f} ({(yr / base[1] - 1) * 100:+.0f}%), "
-             f"Δω RMSE {dr:.4f} ({(dr / base[2] - 1) * 100:+.0f}%)"
+    for hz, dr, fin in rows:
+        info("H1", f"s-diff at {hz}",
+             f"Δω RMSE {dr:.4f} ({(dr / base[1] - 1) * 100:+.0f}%)"
              + ("" if fin else "  ← SPUN"))
-    degraded = rows[2][1] > 3.0 * base[1] or not rows[2][3]
+    degraded = rows[2][1] > 3.0 * base[1] or not rows[2][2]
     check("H1", "gains survive a realistic 100 Hz VCU rate without instability",
-          rows[2][3],
-          "did not spin at 100 Hz" if rows[2][3] else "SPINS at 100 Hz — gains "
+          rows[2][2],
+          "did not spin at 100 Hz" if rows[2][2] else "SPINS at 100 Hz — gains "
           "are tuned to the unrealistic 4 kHz update rate")
-    if degraded and rows[2][3]:
+    if degraded and rows[2][2]:
         info("H1", "degradation at 100 Hz",
              "stable but markedly worse — retune gains at the real VCU rate "
              "before quoting controller performance (finding #1)")
@@ -701,26 +709,26 @@ def section_i():
     # the estimator itself costs.
     model = VehicleModel(vp, MagicFormulaTire(tp_f), MagicFormulaTire(tp_r))
     man = corner_exit()
-    lp = simulate(model, make_configs(vp, tp_f, tp_r, cp)[3], man)
-    ls = simulate(model, make_configs(vp, tp_f, tp_r, cp)[3], man,
+    lp = simulate(model, make_configs(vp, tp_f, tp_r, cp)[1], man)
+    ls = simulate(model, make_configs(vp, tp_f, tp_r, cp)[1], man,
                   sensors=SensorSuite(vp, noise=False), ctrl_every=1)
-    yp = metrics(lp, vp)["yaw RMSE [rad/s]"]
-    ys = metrics(ls, vp)["yaw RMSE [rad/s]"]
+    yp = metrics(lp, vp)["dw RMSE [rad/s]"]
+    ys = metrics(ls, vp)["dw RMSE [rad/s]"]
     check("I4", "clean sensors ≈ perfect state (vx estimation is the only gap)",
           ls["t"][-1] >= man.duration - 0.01 and 0.5 < ys / yp < 1.5,
-          f"yaw RMSE perfect {yp:.4f} vs clean-sensor {ys:.4f} "
+          f"dw RMSE perfect {yp:.4f} vs clean-sensor {ys:.4f} "
           f"({(ys / yp - 1) * 100:+.0f}%)")
 
     # I5: determinism — same seed → bit-identical noisy runs.
-    la = simulate(model, make_configs(vp, tp_f, tp_r, cp)[3], man,
+    la = simulate(model, make_configs(vp, tp_f, tp_r, cp)[1], man,
                   sensors=SensorSuite(vp), ctrl_every=40)
-    lb = simulate(model, make_configs(vp, tp_f, tp_r, cp)[3], man,
+    lb = simulate(model, make_configs(vp, tp_f, tp_r, cp)[1], man,
                   sensors=SensorSuite(vp), ctrl_every=40)
     check("I5", "seeded noise → exactly repeatable runs",
           float(np.abs(la["r"] - lb["r"]).max()) == 0.0 and
           float(np.abs(la["T_RL"] - lb["T_RL"]).max()) == 0.0)
-    info("I5", "full noisy stack at 100 Hz (corner exit, s-diff+TV)",
-         f"yaw RMSE {metrics(la, vp)['yaw RMSE [rad/s]']:.4f} vs perfect "
+    info("I5", "full noisy stack at 100 Hz (corner exit, s-diff)",
+         f"dw RMSE {metrics(la, vp)['dw RMSE [rad/s]']:.4f} vs perfect "
          f"{yp:.4f} — noise + VCU rate + estimation all included")
 
 

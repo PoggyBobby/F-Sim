@@ -1,117 +1,104 @@
 namespace: controllers
 order: 100
-title: "CONTROLLER GAINS — tuned in-sim; retune whenever vehicle/tire numbers move"
+title: "CONTROLLER CONSTANTS — open-loop s-diff (sdiff.h); placeholders until driven"
 
 about: >
-  Tuned controller gains — retuned 2026-08-29 against the report-based car
-  (heavier wheel inertia, 273 N*m wheel torque, I_z = 70). Whenever
-  vehicle/tire numbers change meaningfully, retune again: run the three
-  maneuvers, oscillation = too hot, sluggish tracking = too cold.
+  The constants sdiff.h leaves as 0 ("TODO: tune/define these ... PLS DONT
+  FLASH THIS"). steering_ratio and delta_max come from the team steering
+  chart; everything else is a sim placeholder to be tuned on-car.
 
   These are NOT car data. They are a design output of this sim.
 
-kp_sdiff:
-  label:  "s-diff proportional gain"
-  value:  15.0
-  unit:   N*m/(rad/s)
-  symbol: Kp
-  status: TUNED (sim)
-  what:   "Software differential: torque per rad/s of wheel-speed-difference error."
-  need:   "-"
-  how:    "Re-tune in sim: oscillation = too hot, sluggish = too cold"
-  why:    How hard the s-diff fights wheel-speed error.
-
-ki_sdiff:
-  label:  "s-diff integral gain"
-  value:  60.0
-  unit:   N*m/rad
-  symbol: Ki
-  status: TUNED (sim)
-  what:   "Software differential: torque per accumulated rad of error."
-  need:   "-"
-  how:    Same
-  why:    Removes steady error (e.g. constant-radius corners).
-
-i_sdiff_max:
-  label:  "s-diff integral clamp"
-  value:  60.0
-  unit:   N*m
-  symbol: "-"
-  status: TUNED (sim)
-  what:   Anti-windup limit on the s-diff integral term.
-  need:   "-"
-  how:    Same
-  why:    Stops the integral charging up during saturation and overshooting after.
-
-dt_sdiff_max:
-  label:  "s-diff torque-split clamp"
-  value:  80.0
-  unit:   N*m
-  symbol: dT_max
-  status: TUNED (sim) — SAFETY-CRITICAL
-  what:   Hard cap on how much torque the s-diff may transfer between the wheels.
-  need:   "-"
-  how:    Sized in sim against the spin scenario
-  why: >
-    Without it, an unbounded speed-difference PI dumps torque onto the loaded
-    outer tire near the limit, burns its lateral grip (friction circle), and
-    power-oversteers the car — the sim demonstrates exactly this if you raise
-    the cap. The s-diff's job is trimming wheel speeds, not large torque moves.
-
-kp_tv:
-  label:  "TV proportional gain"
-  value:  2500.0
-  unit:   N*m/(rad/s)
-  symbol: Kp
-  status: TUNED (sim)
-  what:   "Torque vectoring: yaw moment per rad/s of yaw-rate error."
-  need:   "-"
-  how:    Re-tune in sim
-  why:    How hard TV chases the yaw reference.
-
-ki_tv:
-  label:  "TV integral gain"
-  value:  1000.0
-  unit:   N*m/rad
-  symbol: Ki
-  status: TUNED (sim)
-  what:   "Torque vectoring: yaw moment per accumulated rad of error."
-  need:   "-"
-  how:    Same
-  why:    Steady-state yaw accuracy in long corners.
-
-i_tv_max:
-  label:  "TV integral clamp"
-  value:  200.0
-  unit:   N*m
-  symbol: "-"
-  status: TUNED (sim)
-  what:   Anti-windup limit on the TV integral.
-  need:   "-"
-  how:    Same
-  why:    Bounds windup when the reference is unreachable (e.g. full lock at speed).
-
-mz_max:
-  label:  "Yaw-moment clamp"
-  value:  600.0
-  unit:   N*m
-  symbol: Mz_max
-  status: TUNED (sim)
-  what:   Clamp on total commanded yaw moment.
-  need:   "-"
-  how:    Same
-  why:    Keeps TV authority bounded.
-
-ay_frac:
-  label:  "Reference aggressiveness"
-  value:  0.95
+steering_ratio:
+  label:  "Steering ratio (handwheel : road-wheel)"
+  value:  3.2
   unit:   "-"
-  display_unit: 0-1
-  symbol: "-"
-  status: TUNED (sim)
-  what: >
-    The yaw-rate reference is capped at this fraction of the friction-limited
-    lateral acceleration.
+  symbol: STEERING_RATIO
+  status: CURRENT CAR (team steering chart, near-center value)
+  what:   Divides handwheel angle down to road-wheel angle in sdiff.c.
   need:   "-"
-  how:    Same
-  why:    0.95 = ask for 95% of what grip allows — margin against an optimistic reference.
+  how:    Team steering chart (sensors/steering_angle/params.yaml, A1 term)
+  why:    The ratio the real steering chart gives near center; the chart's own map (A0..A2) is the more accurate version at large angle.
+
+delta_max:
+  label:  "Max road-wheel steering angle"
+  value:  0.4049
+  unit:   rad
+  display_unit: 23.2 deg
+  symbol: DELTA_MAX
+  status: CURRENT CAR (team steering chart, full lock)
+  what:   Normalizes steer angle to 0-1 in sdiff.c (delta_norm).
+  need:   "-"
+  how:    Team steering chart, stated max road-wheel angle at full lock
+  why:    Matches the same 23.2 deg full-lock value used elsewhere in the sim.
+
+k_derate:
+  label:  "Friction-budget derate gain"
+  value:  0.3
+  unit:   "-"
+  symbol: K_DERATE
+  status: PLACEHOLDER — UNMEASURED, DO NOT FLASH
+  what:   How much total torque (both wheels) falls off as steer angle rises.
+  need:   On-car tuning once s-diff is driven
+  how:    Start low in sim, raise until corner-exit spin is contained without killing straight-line accel
+  why:    0 = no derate at all (open diff); too high kills exit power on shallow corners.
+
+k_inner:
+  label:  "Inner-wheel extra derate gain"
+  value:  0.2
+  unit:   "-"
+  symbol: K_INNER
+  status: PLACEHOLDER — UNMEASURED, DO NOT FLASH
+  what:   Extra torque cut applied ONLY to the inner (unloaded) wheel on top of k_derate.
+  need:   On-car tuning
+  how:    Same as k_derate — this is the differential-mimicking term
+  why:    "The whole point of s-diff: keep the inner wheel from spinning up."
+
+f_min:
+  label:  "Friction-budget floor"
+  value:  0.4
+  unit:   "-"
+  symbol: F_MIN
+  status: PLACEHOLDER — UNMEASURED
+  what:   Lowest the shared (both-wheel) torque multiplier can fall to, even at full lock.
+  need:   On-car tuning
+  how:    Set so full-lock corners still have usable drive torque
+  why:    Without a floor, k_derate could zero out torque entirely at lock.
+
+deadband:
+  label:  "Steering deadband"
+  value:  0.0175
+  unit:   rad
+  display_unit: 1.0 deg
+  symbol: DEADBAND
+  status: PLACEHOLDER — UNMEASURED
+  what:   Steering angle band around center treated as "straight" (no inner/outer split).
+  need:   On-car tuning
+  how:    Should roughly match handwheel play / SAS noise floor
+  why:    Stops the inner/outer split from chattering when the driver is nominally straight.
+
+rate:
+  label:  "Slew rate"
+  value:  4.0
+  unit:   Hz
+  symbol: RATE
+  status: PLACEHOLDER — UNMEASURED
+  what:   Max speed the friction-budget and left/right multipliers may change, per second.
+  need:   On-car tuning
+  how:    Slow enough to avoid a torque step the driver feels; fast enough to react within a corner
+  why:    Without slew limiting, torque would jump discontinuously at the deadband edges.
+
+torque_clamp_Nm:
+  label:  "s-diff per-wheel command clamp"
+  value:  2310.0
+  unit:   N*m
+  symbol: "-"
+  status: PLACEHOLDER — CARRIED OVER FROM sdiff.c, UNITS MISMATCH
+  what:   Hard clamp on each wheel's commanded torque in sdiff.c.
+  need:   Real inverter/motor current or torque limit (see custom-inverters CAN docs)
+  how:    Replace once the VESC current limit and torque constant are known
+  why: >
+    2310 was sized for the old AMK inverters (tenths of N*m over CAN); the
+    custom inverters command milliamps instead, so this number is almost
+    certainly wrong for the real hardware and is kept only to mirror sdiff.c.
+

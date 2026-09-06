@@ -564,12 +564,11 @@ class RunRecorder:
         if tables:
             L.append("## How to read the tables")
             L.append("")
-            L.append("All four configs get IDENTICAL inputs — differences are "
-                     "the torque split alone. **yaw RMSE** = tracking of the "
-                     "driver's implied yaw rate (lower = better; TV's job) · "
+            L.append("All configs get IDENTICAL inputs — differences are "
+                     "the torque split alone. "
                      "**max \\|beta\\|** = peak sideslip (small = planted; "
                      "~57° = spun) · **dw RMSE** = wheel-speed diff vs corner "
-                     "geometry (the s-diff's job; TV trades it away by design) "
+                     "geometry (the s-diff's job) "
                      "· **max \\|kappa\\|** = worst wheel slip (above the "
                      "tire peak ≈ 0.10 = wheelspin, red wheel in the replay) "
                      "· **max \\|ay\\|** = grip actually used. Full test "

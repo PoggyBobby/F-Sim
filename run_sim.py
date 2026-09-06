@@ -34,7 +34,7 @@ from style import RC, CONFIG_COLORS, REF_COLOR, config_lw, config_z
 import runlog
 from runlog import RunRecorder
 
-METRIC_COLS = ["yaw RMSE [rad/s]", "max |beta| [deg]", "dw RMSE [rad/s]",
+METRIC_COLS = ["max |beta| [deg]", "dw RMSE [rad/s]",
                "max |kappa| [-]", "max |ay| [g]"]
 
 
@@ -62,12 +62,7 @@ def plot_response(plt, maneuver, results, outdir, tag=""):
 
     ax = axs[0, 0]
     _plot_series(ax, results, "t", "r")
-    ref = results["s-diff + TV"]["log"]
-    ax.plot(ref["t"], ref["r_ref"], "--", color=REF_COLOR, lw=1.6, zorder=1,
-            label="yaw-rate reference (what the steering asks for)")
-    ax.set_title("Yaw rate — did the car rotate as the driver asked?\n"
-                 "(on the dashed reference = precise handling; TV's job)",
-                 fontsize=10)
+    ax.set_title("Yaw rate — how the car rotated", fontsize=10)
     ax.set_xlabel("time  t  [s]")
     ax.set_ylabel("yaw rate  r  [rad/s]")
 
@@ -123,7 +118,7 @@ def plot_wheels(plt, maneuver, results, outdir, tag="", k_spin=None,
     ax.axhline(0.0, ls="--", color=REF_COLOR, lw=1.6, zorder=1,
                label="zero error = wheels exactly match corner geometry")
     ax.set_title("s-diff objective: wheel-speed-difference error\n"
-                 "(s-diff should pin this to zero; TV trades it for yaw)",
+                 "(s-diff should pin this to zero)",
                  fontsize=10)
     ax.set_xlabel("time  t  [s]")
     ax.set_ylabel("Δω error = target − actual  [rad/s]")
@@ -290,7 +285,7 @@ def build_maneuvers(args, vp, interactive):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="SR s-diff / TV basic sim")
+    ap = argparse.ArgumentParser(description="SR s-diff basic sim")
     ap.add_argument("--maneuver", default="all",
                     choices=["all", "step_steer", "corner_exit", "slalom",
                              "pedal_check", "tracks"],
@@ -388,7 +383,7 @@ def main():
                                                     else "physics rate")})
     run_dir = rec.begin(maneuvers, config_names)
 
-    print("SJSU Spartan Racing — software-diff / torque-vectoring basic sim")
+    print("SJSU Spartan Racing — software-diff basic sim")
     print(f"  total mass {vp.m_total:.0f} kg, wheelbase {vp.wheelbase:.2f} m, "
           f"peak wheel torque {vp.T_wheel_max:.0f} N·m/side"
           "  (sources/tags: the params.yaml files)")

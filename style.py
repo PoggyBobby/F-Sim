@@ -18,9 +18,7 @@ figure carries a legend and the animation direct-labels each car.
 # ── categorical: one slot per controller config, fixed order ─────────────
 CONFIG_COLORS = {
     "open (50/50)": "#2a78d6",   # blue
-    "s-diff":       "#eb6834",   # orange
-    "TV":           "#1baf7a",   # aqua
-    "s-diff + TV":  "#eda100",   # yellow (drawn last + slightly thicker)
+    "s-diff":       "#eb6834",   # orange (drawn last + slightly thicker)
     "VCU (SIL)":    "#8a63d2",   # violet — the real firmware in the loop
 }
 
@@ -58,9 +56,9 @@ RC = {
 
 
 def config_lw(name):
-    """The combined config is drawn slightly thicker and on top."""
-    return 2.2 if name == "s-diff + TV" else 2.0
+    """The s-diff config is drawn slightly thicker and on top."""
+    return 2.2 if name == "s-diff" else 2.0
 
 
 def config_z(name):
-    return 3 if name == "s-diff + TV" else 2
+    return 3 if name == "s-diff" else 2

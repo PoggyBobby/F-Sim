@@ -1,52 +1,38 @@
-"""Torque-split controllers: software differential, torque vectoring, both.
+"""Torque-split controllers: open diff and software differential.
 
 With two independent rear motors there is no mechanical differential — the
 "differential" is whatever the software decides the left/right torque split
-is. Everything below reduces to choosing:
+is. Everything below reduces to choosing T_RL and T_RR from the driver's
+per-wheel request T_base = T_req_total / 2.
 
-    T_RL = T_base - dT/2
-    T_RR = T_base + dT/2        with  dT = dT_sdiff + dT_tv
+1) OPEN-DIFF BASELINE (s-diff off): T_RL = T_RR = T_base. This exactly
+   reproduces an open differential (equal torque, wheels free to spin at
+   different speeds) — including its failure mode: an unloaded inner wheel
+   can spin up and dump grip.
 
-1) OPEN-DIFF BASELINE (both controllers off): equal torque to both motors.
-   This exactly reproduces an open differential (equal torque, wheels free
-   to spin at different speeds) — including its failure mode: an unloaded
-   inner wheel can spin up and dump grip.
+2) SOFTWARE DIFFERENTIAL (s-diff): a line-for-line port of sdiff.c from the
+   SRE-VCU `S-diff` branch (Andy Van, Sellab Ahmadzai). OPEN LOOP — it reads
+   the steering angle only, never the wheel speeds:
+        delta_norm = |delta| / delta_max                     (0..1)
+        f          = 1 - k_derate * delta_norm, floored at f_min   (shared budget)
+        g_in       = 1 - k_inner  * delta_norm,  g_out = 1         (inner extra cut)
+        inner side = left if delta > deadband, right if delta < -deadband,
+                     neither inside the deadband (f still applies)
+        f, g_left, g_right are slew-limited at `rate` per second, then
+        T_RL = T_base * f * g_left,  T_RR = T_base * f * g_right,
+        each clamped to ±torque_clamp_Nm.
+   Same variable names as the C so the two can be diffed by eye. Two
+   deliberate differences: no handwheel→road-wheel conversion (our delta is
+   already a road-wheel angle in rad), and slew() takes dt instead of
+   assuming the VCU's 10 ms loop. Constants: controllers/python/params.yaml.
 
-2) SOFTWARE DIFFERENTIAL (s-diff): makes the wheel-speed DIFFERENCE track
-   the value the corner geometry requires. A wheel at lateral offset y from
-   the CG must roll at ground speed vx - r*y, so the rear pair should differ
-   by:
-        Δω_target = ω_RR - ω_RL = r * track_r / r_wheel
-   A PI controller on  e = Δω_target - (ω_RR - ω_RL)  shifts torque from the
-   wheel spinning faster than geometry allows to the other one. This acts
-   like an ideal limited-slip diff: it permits exactly the kinematic speed
-   difference and fights inner-wheel spin-up beyond it.
-
-3) TORQUE VECTORING (TV): makes the YAW RATE track a reference computed
-   from what the driver is asking for (steering angle + speed), using the
-   steady-state single-track (bicycle) model:
-
-        r_ref = vx * delta / (L + K_us * vx^2)
-        K_us  = m/L * ( b/C_f - a/C_r )        (understeer gradient)
-
-   capped by the friction-limited lateral acceleration  |r| <= ay_max/vx,
-   with ay_max = mu*(g + downforce/m). A PI controller on e = r_ref - r
-   commands a yaw moment M_z, produced by a left/right longitudinal force
-   difference at the rear axle:
-
-        M_z = (track_r/2) * (Fx_RR - Fx_RL) = (track_r/2) * dT/r_wheel
-        =>  dT_tv = 2 * M_z * r_wheel / track_r
-
-4) COMBINED: dT contributions simply sum. They are complementary — the
-   s-diff regulates wheel SPEEDS (traction management), TV regulates the
-   body YAW RATE (handling balance) — and at corner exit they push the same
-   direction: both move torque away from the unloaded inner wheel.
+Torque vectoring is parked in torque_vectoring.py (not imported).
 
 After the split, physical limits are enforced: per-motor peak torque, the
 regen speed cutoff, per-motor peak power, and the 80 kW total (FSAE EV
 rules) cap. When one wheel's command would exceed its torque limit, the
-BASE torque is shifted so the left/right DIFFERENCE (i.e. the yaw moment)
-is preserved — total thrust is sacrificed before yaw authority.
+mean torque is shifted so the left/right DIFFERENCE is preserved — total
+thrust is sacrificed before the split.
 
 Two update paths exist:
   update(...)               — perfect-state feedback (physics testing)
@@ -58,96 +44,90 @@ Two update paths exist:
 """
 
 import math
-from dataclasses import dataclass, field
-from model.params import VehicleParams, TireParams, ControlParams, G, RHO_AIR
+from dataclasses import dataclass
+from model.params import VehicleParams, TireParams, ControlParams
 from model.physical.vehicle import IVX, IR, IWRL, IWRR
 
 
 @dataclass
 class ControllerDebug:
-    r_ref: float = 0.0        # yaw-rate reference [rad/s]
     dw_target: float = 0.0    # target wheel-speed difference wRR-wRL [rad/s]
     dT_sdiff: float = 0.0     # s-diff torque-split contribution [N·m]
-    dT_tv: float = 0.0        # TV torque-split contribution [N·m]
-    Mz_cmd: float = 0.0       # commanded yaw moment [N·m]
+    delta_norm: float = 0.0   # |steer| / delta_max, 0..1
+    f_applied: float = 1.0    # shared friction-budget multiplier (slewed)
+    g_left_appl: float = 1.0  # left-wheel multiplier (slewed)
+    g_right_appl: float = 1.0 # right-wheel multiplier (slewed)
     T_RL: float = 0.0
     T_RR: float = 0.0
 
 
+def clampf(x, lo, hi):
+    return lo if x < lo else (hi if x > hi else x)
+
+def slew(x, target, rate, dt):
+    step = rate * dt
+    if (target > x):
+        return x+step if (x + step < target) else target
+    if (target < x):
+        return x-step if (x - step > target) else target
+    return x
+
+
 class TorqueSplitController:
-    """One controller class; s-diff and TV terms are switched on/off to get
-    the four configurations (open / s-diff / TV / combined)."""
+    """One controller class; the s-diff term is switched on/off to get the
+    two configurations (open / s-diff)."""
 
     def __init__(self, vp: VehicleParams, tp_front: TireParams,
                  tp_rear: TireParams, cp: ControlParams,
-                 sdiff_on: bool, tv_on: bool, name: str):
+                 sdiff_on: bool, name: str):
         self.vp, self.cp = vp, cp
-        self.sdiff_on, self.tv_on = sdiff_on, tv_on
+        self.sdiff_on = sdiff_on
         self.name = name
-        self.mu_ref = 0.5 * (tp_front.mu0 + tp_rear.mu0)  # for the ay cap
 
-        # understeer gradient from the linearized tire stiffnesses at static
-        # axle loads:  C_axle = c_alpha * Fz_axle  (per-axle, both tires)
-        m, L = vp.m_total, vp.wheelbase
-        C_f = tp_front.c_alpha * m * G * vp.b / L
-        C_r = tp_rear.c_alpha * m * G * vp.a / L
-        self.K_us = m / L * (vp.b / C_f - vp.a / C_r)   # s^2/m, >0 = understeer
-
-        self.i_sdiff = 0.0   # integral terms (stored as torque / moment)
-        self.i_tv = 0.0
-        self.plaus_cut = False
+        self.plaus_cut = False   # EV.4.7 APPS/BPS plausibility latch
+        self.f_applied = 1.0     # slewed multipliers — SDiff_new() in sdiff.c
+        self.g_left_appl = 1.0
+        self.g_right_appl = 1.0
 
     def reset(self):
-        self.i_sdiff = 0.0
-        self.i_tv = 0.0
-        self.plaus_cut = False   # EV.4.7 APPS/BPS plausibility latch
+        self.plaus_cut = False
+        self.f_applied = 1.0
+        self.g_left_appl = 1.0
+        self.g_right_appl = 1.0
 
-    # ------------------------------------------------------- reference model
-    def yaw_rate_ref(self, vx: float, delta: float) -> float:
-        vp, L = self.vp, self.vp.wheelbase
-        vx_s = max(vx, 1.0)
-        r_ref = vx_s * delta / (L + self.K_us * vx_s * vx_s)
-        # friction-limited cap: |ay| = |r*vx| <= mu*(g + downforce/m)
-        downforce = 0.5 * RHO_AIR * vp.ClA * vx * vx
-        ay_max = self.mu_ref * (G + downforce / vp.m_total)
-        r_cap = self.cp.ay_frac * ay_max / vx_s
-        return max(-r_cap, min(r_cap, r_ref))
-
-    # --------------------------------------------------------------- update
+    # ------------------------------------------- update (s_diff_control)
     def update(self, s, delta: float, T_req_total: float, dt: float) -> ControllerDebug:
         vp, cp = self.vp, self.cp
         vx, r = s[IVX], s[IR]
         wRL, wRR = s[IWRL], s[IWRR]
-
         dbg = ControllerDebug()
-        dbg.r_ref = self.yaw_rate_ref(vx, delta)
         dbg.dw_target = r * vp.track_r / vp.r_wheel
 
         T_base = T_req_total / 2.0
-        dT = 0.0
-
-        if self.tv_on:
-            e = dbg.r_ref - r
-            self.i_tv += cp.ki_tv * e * dt
-            self.i_tv = max(-cp.i_tv_max, min(cp.i_tv_max, self.i_tv))
-            Mz = cp.kp_tv * e + self.i_tv
-            Mz = max(-cp.Mz_max, min(cp.Mz_max, Mz))
-            dbg.Mz_cmd = Mz
-            dbg.dT_tv = 2.0 * Mz * vp.r_wheel / vp.track_r
-            dT += dbg.dT_tv
-
         if self.sdiff_on:
-            e = dbg.dw_target - (wRR - wRL)
-            self.i_sdiff += cp.ki_sdiff * e * dt
-            self.i_sdiff = max(-cp.i_sdiff_max, min(cp.i_sdiff_max, self.i_sdiff))
-            # cap the transfer: the s-diff trims wheel speeds, it must not
-            # dump torque onto the loaded outer tire (power-oversteer risk)
-            dbg.dT_sdiff = max(-cp.dT_sdiff_max, min(cp.dT_sdiff_max,
-                               cp.kp_sdiff * e + self.i_sdiff))
-            dT += dbg.dT_sdiff
+            delta_norm = clampf(abs(delta / cp.delta_max), 0.0, 1.0)  # delta is a road-wheel angle [rad]
+            dbg.delta_norm = delta_norm
+            f = clampf(1.0 - cp.k_derate * delta_norm, cp.f_min, 1.0)
+            g_in = 1.0 - cp.k_inner * delta_norm
+            g_out = 1.0
+            if delta > cp.deadband:
+                g_left, g_right = g_in, g_out
+            elif delta < -cp.deadband:
+                g_left, g_right = g_out, g_in
+            else:
+                g_left = g_right = 1.0
+            self.f_applied = slew(self.f_applied, f, cp.rate, dt)
+            self.g_left_appl = slew(self.g_left_appl, g_left, cp.rate, dt)
+            self.g_right_appl = slew(self.g_right_appl, g_right, cp.rate, dt)
+            dbg.f_applied, dbg.g_left_appl, dbg.g_right_appl = self.f_applied, self.g_left_appl, self.g_right_appl
+            T_RL = clampf(T_base * self.f_applied * self.g_left_appl,  -cp.torque_clamp_Nm, cp.torque_clamp_Nm)
+            T_RR = clampf(T_base * self.f_applied * self.g_right_appl, -cp.torque_clamp_Nm, cp.torque_clamp_Nm)
+        else:
+            T_RL = T_RR = T_base
 
-        T_RL, T_RR = self._apply_limits(T_base, dT, vx, wRL, wRR)
+        T_RL, T_RR = self._apply_limits((T_RL + T_RR) / 2.0, T_RR - T_RL, vx, wRL, wRR)
         dbg.T_RL, dbg.T_RR = T_RL, T_RR
+        dbg.dT_sdiff = T_RR - T_RL
         return dbg
 
     # -------------------------------------------------- sensor-driven update
@@ -196,7 +176,6 @@ class TorqueSplitController:
 
         # clip the split itself to what the torque range can ever produce
         dT = max(-(T_max - T_min), min(T_max - T_min, dT))
-
         T_RL = T_base - dT / 2.0
         T_RR = T_base + dT / 2.0
 
@@ -230,10 +209,8 @@ class TorqueSplitController:
 
 # ────────────────────────────────────────────────────────── configurations
 def make_configs(vp, tp_front, tp_rear, cp):
-    """The four configurations compared in every maneuver."""
+    """The two configurations compared in every maneuver."""
     return [
-        TorqueSplitController(vp, tp_front, tp_rear, cp, False, False, "open (50/50)"),
-        TorqueSplitController(vp, tp_front, tp_rear, cp, True,  False, "s-diff"),
-        TorqueSplitController(vp, tp_front, tp_rear, cp, False, True,  "TV"),
-        TorqueSplitController(vp, tp_front, tp_rear, cp, True,  True,  "s-diff + TV"),
+        TorqueSplitController(vp, tp_front, tp_rear, cp, False, "open (50/50)"),
+        TorqueSplitController(vp, tp_front, tp_rear, cp, True,  "s-diff"),
     ]

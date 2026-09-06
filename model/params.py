@@ -10,7 +10,7 @@ car, edit the YAML file next to the component:
     model/physical/drivetrain/params.yaml  wheels, gearing, motors, limits
     model/physical/aero/params.yaml        C_L, C_D, area, balance
     model/physical/tires/params.yaml       Magic Formula coefficients
-    controllers/python/params.yaml         the tuned gains
+    controllers/python/params.yaml         the s-diff constants
 
 This file only defines:
   * the dataclass containers the rest of the code passes around,
@@ -56,6 +56,7 @@ class VehicleParams:
     I_wheel: float = cfg.drivetrain.I_wheel
     gear_ratio: float = cfg.drivetrain.gear_ratio
     motor_T_peak: float = cfg.drivetrain.motor_torque_peak
+    motor_kt: float = cfg.drivetrain.motor_kt
     motor_P_peak: float = cfg.drivetrain.motor_power_peak
     P_total_max: float = cfg.drivetrain.power_cap_total
     regen_speed_cutoff: float = cfg.drivetrain.regen_speed_cutoff
@@ -113,19 +114,19 @@ class TireParams:
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# Controller gains — controllers/python/params.yaml; retune on real data
+# Controller constants — controllers/python/params.yaml
 # ─────────────────────────────────────────────────────────────────────────
 @dataclass
 class ControlParams:
-    kp_sdiff: float = cfg.controllers.kp_sdiff
-    ki_sdiff: float = cfg.controllers.ki_sdiff
-    i_sdiff_max: float = cfg.controllers.i_sdiff_max
-    dT_sdiff_max: float = cfg.controllers.dt_sdiff_max
-    kp_tv: float = cfg.controllers.kp_tv
-    ki_tv: float = cfg.controllers.ki_tv
-    i_tv_max: float = cfg.controllers.i_tv_max
-    Mz_max: float = cfg.controllers.mz_max
-    ay_frac: float = cfg.controllers.ay_frac
+    # open-loop s-diff (sdiff.c) — see controllers/python/params.yaml
+    steering_ratio: float = cfg.controllers.steering_ratio
+    delta_max: float = cfg.controllers.delta_max
+    k_derate: float = cfg.controllers.k_derate
+    k_inner: float = cfg.controllers.k_inner
+    f_min: float = cfg.controllers.f_min
+    deadband: float = cfg.controllers.deadband
+    rate: float = cfg.controllers.rate
+    torque_clamp_Nm: float = cfg.controllers.torque_clamp_Nm
 
 
 def default_setup():
