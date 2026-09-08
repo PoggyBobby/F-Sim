@@ -4,10 +4,6 @@ Each maneuver returns (delta [rad], T_req_total [N·m at the wheels]) as a
 function of time. No driver model — inputs are scripted so that runs are
 exactly repeatable between controller configurations.
 
-WHAT EACH TEST MEASURES, HOW, AND THE NUMBERS WE WANT: BREAKDOWN.md §6
-(the test catalog) — also the "Tests" tab of FSAE-Sim Parameters.xlsx, and
-every run's summary.md carries a metrics legend.
-
 REAL ENVELOPE (team, 2026-08-30) — the first real test-envelope numbers:
   * max road-wheel steer angle: 23 deg
   * expected top speed in endurance: ~40 mph = 17.88 m/s
