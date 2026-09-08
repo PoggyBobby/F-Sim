@@ -29,6 +29,10 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 # regenerate the team spreadsheet after changing any number
 .venv/bin/python param_sheet.py
 
+# regenerate the generated table in docs/guide/parameters.md (same trigger)
+.venv/bin/python param_table.py
+.venv/bin/python param_table.py --check    # exit 1 if the doc is stale
+
 # read one value or its full provenance entry
 .venv/bin/python -c "from model.config import cfg; print(cfg.tires.mu0)"
 .venv/bin/python -c "import json; from model.config import cfg; print(json.dumps(cfg.meta('mass.car_no_driver'), indent=2))"
@@ -39,6 +43,29 @@ git submodule update --init sil/SRE-VCU && make -C sil
 ```
 
 `README.md` has the full flag list. There is no pytest suite and no linter — `verify.py` **is** the test suite.
+
+### Keeping docs/guide/parameters.md in sync
+
+`docs/guide/parameters.md` holds a generated table (parameter_name, file_name,
+parameter_type) between `<!-- BEGIN PARAM TABLE -->` / `<!-- END PARAM TABLE -->`
+markers. `param_table.py` rewrites everything between them from `cfg`; the prose
+outside them is hand-written and must not be touched by the generator or by hand-
+editing the rows.
+
+**Check it on every parameter change.** Whenever `git status` / `git diff` shows a
+`params.yaml` touched — including a `status:` tag edit, or a `params.yaml` added or
+deleted — the table is potentially stale:
+
+```bash
+git diff --name-only HEAD -- '*params.yaml'   # did any parameter data move?
+.venv/bin/python param_table.py --check       # exit 1 = stale
+.venv/bin/python param_table.py               # regenerate, then read the diff
+```
+
+Never commit a `params.yaml` change with a stale table. The `param-table` skill
+(`.claude/skills/param-table/SKILL.md`) walks the full check → regenerate → verify
+sequence, including the two other artifacts the same edit invalidates
+(`param_sheet.py`'s spreadsheet and `verify.py`).
 
 ### Running one verification section
 
