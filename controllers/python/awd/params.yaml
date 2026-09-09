@@ -1,0 +1,272 @@
+namespace: controllers.awd
+order: 101
+title: "CONTROLLER — four-corner torque allocator (AWD, sim design output)"
+
+about: >
+  Constants of the four-corner torque allocator (controllers/python/torque_allocator.py),
+  the default controller once every upright has a motor.
+
+  UNLIKE controllers/python/params.yaml, which mirrors the #defines in sdiff.c and
+  must never be tuned here, THIS FILE IS A DESIGN OUTPUT OF THIS SIM. Nothing in it
+  exists in the firmware. When the VCU grows a four-motor path these are the numbers
+  to propose TO it, not the other way round — so nothing here may carry a CURRENT CAR
+  tag, which is reserved for values that mirror the car or the firmware.
+
+  Three stages, and the constants below are grouped by stage:
+    1  axle split    — front/rear share follows the ESTIMATED normal-load split, so
+                       torque follows load transfer instead of fighting it
+    2  left/right    — each axle's torque is shared between its wheels in proportion
+                       to estimated corner load
+    2b spin guard    — per-corner proportional cut once |slip| passes kappa_lim
+    3  limits        — see the ordering comment in _apply_limits4()
+
+  Both accelerations the estimators use are DERIVED, never measured: ax from the
+  torque request (feedforward), ay from yaw rate plus a kinematic steer feedforward.
+  That is deliberate. It keeps the perfect-state and sensor update paths numerically
+  identical except for the vx estimate — which is the single gap verify I4 exists to
+  bound — and it means no measurement can feed back into the split and oscillate.
+
+frac_front_base:
+  label:  "Base front torque share"
+  value:  0.44
+  unit:   "-"
+  display_unit: 0-1
+  symbol: frac_f0
+  status: TUNED (sim)
+  what:   Front-axle share of total drive torque before any load-transfer correction.
+  need:   A front/rear bias decision from the powertrain team
+  how:    Start near geometry.weight_fraction_front (0.4344), then sweep in the corner tests
+  why: >
+    With k_load = 1 this is the whole split at zero acceleration. Slightly ABOVE the
+    static front weight fraction on purpose: mu rises as load falls, so the lightly
+    loaded front axle makes a little more grip per newton than its load share implies
+    (0.8 points at rest, 2.3 at 1.2 g). This offset absorbs most of that.
+
+k_load:
+  label:  "Load-following gain"
+  value:  1.0
+  unit:   "-"
+  symbol: K_LOAD
+  status: TUNED (sim)
+  what:   How strongly the axle split follows the estimated normal-load split.
+  need:   "-"
+  how:    Sweep 0 -> 1 across corner_exit and the track matrix
+  why: >
+    frac_front = frac_front_base + k_load*(Fz_front_share - static_front_share).
+    1.0 = torque tracks axle load; 0 = a fixed split that ignores load transfer.
+    The front share falls 0.434 -> 0.283 at 1 g, so this gain moves ~15 points of
+    the split. It is the biggest single lever in the allocator, and the reason it
+    exists: an even four-way split spins the fronts above ~500 N*m of request.
+
+frac_front_min:
+  label:  "Front share floor"
+  value:  0.10
+  unit:   "-"
+  display_unit: 0-1
+  symbol: "-"
+  status: TUNED (sim)
+  what:   Lowest front-axle torque share the allocator may command.
+  need:   "-"
+  how:    Set above zero so the front inverters never fully idle mid-corner
+  why: >
+    At 1.5 g the load estimate alone asks for 0.21, so this floor is not normally
+    active. It exists so a bad ax estimate can never fully unload the front motors,
+    which would make their resolver speeds useless to the spin guard and to the
+    ground-speed estimator that depends on all four corners disagreeing honestly.
+
+frac_front_max:
+  label:  "Front share ceiling"
+  value:  0.55
+  unit:   "-"
+  display_unit: 0-1
+  symbol: "-"
+  status: TUNED (sim)
+  what:   Highest front-axle torque share the allocator may command.
+  need:   "-"
+  how:    Corner tests; the binding case is regen, not drive
+  why: >
+    The front tires are also making the car's steering force, so their longitudinal
+    budget is smaller than a pure load estimate implies. Under regen the load moves
+    forward and the raw estimate asks for more than this, so this ceiling is the one
+    that actually binds.
+
+frac_rate:
+  label:  "Axle-split slew rate"
+  value:  2.0
+  unit:   Hz
+  symbol: "-"
+  status: TUNED (sim)
+  what:   Maximum rate of change of the front torque share, per second.
+  need:   "-"
+  how:    Fast enough not to lag a throttle step, slow enough not to step the actuators
+  why: >
+    The load estimate follows the torque REQUEST, which the driver can step. Slewing
+    the share (the same slew() the s-diff uses) keeps a pedal step from stepping the
+    front/rear split. At 2.0/s a full 0.44 -> 0.10 swing takes 0.17 s.
+
+ax_est_max:
+  label:  "Feedforward accel clamp"
+  value:  15.0
+  unit:   m/s^2
+  symbol: "-"
+  status: TUNED (sim) — set near mu_x*g
+  what:   Clamp on the feedforward longitudinal-acceleration estimate.
+  need:   "-"
+  how:    tires.mu0_long * environment.g = 1.58*9.81 = 15.5 m/s^2
+  why: >
+    The estimate believes the REQUEST. Four wheels at peak (1092 N*m) imply
+    18.9 m/s^2 = 1.93 g, far past what the tires can deliver, and an over-read here
+    over-predicts rearward load transfer and starves the front — the exact failure
+    the allocator exists to avoid.
+
+load_exponent:
+  label:  "Left/right load exponent"
+  value:  0.3
+  unit:   "-"
+  symbol: p
+  status: TUNED (sim)
+  what:   Exponent on each corner's estimated vertical load when sharing that axle's torque.
+  need:   "-"
+  how:    Sweep 0 -> 1.5 on corner exit; watch inner-wheel slip against outer-wheel margin
+  why: >
+    share_i = Fz_i^p / sum(Fz^p) within an axle. p = 0 is EXACTLY an open
+    differential (which is how the baseline config is built, and a bit-exact check);
+    p = 1 is load-proportional; p > 1 deliberately over-biases the outer wheel.
+    Chosen over the s-diff's steering-angle law because it needs no deadband — the
+    split fades to 50/50 on its own as lateral acceleration goes away — and because
+    it is correct in right-hand corners without any "left is inner" assumption.
+  note: >
+    THIS VALUE SITS BELOW A STABILITY CLIFF, AND THE CLIFF MOVES WITH TORQUE.
+    Sending more torque to the loaded OUTER wheel makes a yaw moment INTO the
+    corner. That is the point — but the moment scales with the torque being
+    split, so a fixed exponent that is safe at one throttle level is not safe at
+    a higher one. Swept on corner_exit at the 100 Hz VCU rate, as dw RMSE with
+    "!" marking a spin (max |beta| 57 deg):
+
+      request:      30% of grip   35%      40%
+      p = 0.0        0.336        0.443    0.558      (an open diff)
+      p = 0.2        0.258        0.340    0.426
+      p = 0.3        0.219        0.288    0.365      <- shipped
+      p = 0.4        0.180        0.276!   0.315!
+      p = 0.5        0.144        0.180!   0.206!
+
+    0.3 is the largest exponent that survives the whole torque range while still
+    improving ~35% on an open diff. Note the trap: the objective keeps improving
+    monotonically right across the cliff, so tuning on dw RMSE alone walks
+    straight off it — every sweep here has to carry a stability column.
+
+    Confirmed rate-independent: 4 kHz and 100 Hz spin at the same p, so this is
+    a control-authority limit, not a discretisation artifact.
+
+    KNOWN GAP: the exponent has no torque awareness, which is why the cliff
+    moves. A yaw-rate-referenced term (see torque_vectoring.py) would bound the
+    moment directly instead of bounding its cause. Deliberately out of scope
+    here — it is a second control loop and would confound this allocator's own
+    evaluation.
+
+share_min:
+  label:  "Minimum wheel share"
+  value:  0.05
+  unit:   "-"
+  display_unit: 0-1
+  symbol: "-"
+  status: NUMERICAL GUARD
+  what:   Smallest fraction of an axle's torque one wheel may be given.
+  need:   "-"
+  how:    "-"
+  why: >
+    The load estimate clamps a lifted wheel to Fz = 0, which would ask for a 100/0
+    split the torque limits cannot produce anyway. This keeps a little torque on the
+    unloaded wheel so its speed stays informative to the spin guard.
+
+ay_ff_frac:
+  label:  "Lateral-accel feedforward fraction"
+  value:  0.3
+  unit:   "-"
+  display_unit: 0-1
+  symbol: "-"
+  status: TUNED (sim)
+  what:   Blend of the kinematic steer estimate into the lateral-acceleration estimate.
+  need:   "-"
+  how:    Step steer — raise until the split leads turn-in without overshooting
+  why: >
+    ay = (1-f)*r*vx + f*vx^2*delta/L. The yaw-rate term is truthful but lags the
+    steering input; the kinematic term has no lag but ignores tire compliance. 0.3
+    buys phase lead at corner entry for little steady-state cost. (This is
+    torque_vectoring.py's yaw reference reused as a LOAD estimator rather than a
+    closed-loop target — a far lower-risk use of the same expression.)
+
+ay_est_max:
+  label:  "Lateral accel clamp"
+  value:  20.0
+  unit:   m/s^2
+  symbol: "-"
+  status: NUMERICAL GUARD
+  what:   Clamp on the lateral-acceleration estimate used for load transfer.
+  need:   "-"
+  how:    "-"
+  why: >
+    r*vx is a product of two estimates; a gyro spike or a vx estimate that has
+    followed four spinning wheels could otherwise saturate the left/right split.
+    20 m/s^2 (~2 g) is above anything the tires can make, so this never acts in
+    normal running.
+
+kappa_lim:
+  label:  "Spin-guard slip threshold"
+  value:  0.08
+  unit:   "-"
+  symbol: kappa_lim
+  status: TUNED (sim)
+  what:   Slip-ratio magnitude at which the per-corner spin guard starts cutting torque.
+  need:   "-"
+  how:    MagicFormulaTire.kappa_at_peak() at static load — 0.100 front, 0.097 rear
+  why: >
+    Set just below the tire's own peak-force slip, so the guard acts BEFORE more
+    wheel speed starts making less force. Uses |kappa|, so it also catches a wheel
+    locking under regen.
+
+k_spin:
+  label:  "Spin-guard gain"
+  value:  1.0
+  unit:   "-"
+  symbol: K_SPIN
+  status: TUNED (sim)
+  what:   Proportional cut applied per unit of slip overshoot past kappa_lim.
+  need:   "-"
+  how:    Corner exit at 65-100% throttle; raise until inner-wheel slip is contained
+  why: >
+    h = 1 - k_spin*(|kappa| - kappa_lim)/kappa_lim, floored at spin_floor.
+    Proportional only, no integrator, so there is no gain that needs retuning when
+    the VCU rate changes — which is the standing finding in verify section H.
+  note: >
+    Only as good as vx_est. With four driven wheels a wheel-speed-only ground-speed
+    estimate follows the spinning wheels and every kappa collapses toward zero;
+    model/sensors/vcu/vx_estimator.py is what keeps this term honest.
+
+spin_floor:
+  label:  "Spin-guard floor"
+  value:  0.3
+  unit:   "-"
+  display_unit: 0-1
+  symbol: "-"
+  status: TUNED (sim)
+  what:   Lowest multiplier the spin guard may apply to one corner.
+  need:   "-"
+  how:    "-"
+  why: >
+    Never take a corner to zero: a wheel with no torque gives up its share of drive
+    force AND its slip signal stops being informative. 0.3 keeps both.
+
+spin_release_rate:
+  label:  "Spin-guard release rate"
+  value:  3.0
+  unit:   Hz
+  symbol: "-"
+  status: TUNED (sim)
+  what:   Rate at which a cut corner is allowed back to full torque, per second.
+  need:   "-"
+  how:    "-"
+  why: >
+    Deliberately asymmetric — the cut is immediate, the restore is rate limited.
+    That is what stops a wheel cycling between spinning and gripping, and it is why
+    the guard needs no state beyond one multiplier per corner.

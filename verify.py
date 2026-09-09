@@ -40,7 +40,9 @@ from model.physical.vehicle import (VehicleModel, front_steer_angles, NSTATES, N
                                     wheel_steer_angles,
                                     contact_speeds, IX, IY, IPSI,
                      IVX, IVY, IR, IWRL, IWRR)
-from controllers.python.torque_split import TorqueSplitController, make_configs
+from controllers.python.torque_split import TorqueSplitController
+from controllers.python.torque_allocator import (make_configs, FourCornerAllocator,
+                                                 axle_load_fraction, ax_feedforward)
 from model.maneuvers.maneuvers import Maneuver, step_steer, corner_exit, slalom
 from model.sim import simulate, metrics
 
@@ -558,7 +560,9 @@ def section_e():
 # ═══════════════════════════════════ F. controller limit unit tests
 def section_f():
     vp, tp_f, tp_r, cp = default_setup()
-    ctrl = make_configs(vp, tp_f, tp_r, cp)[1]
+    # index 2 is the rear-drive s-diff reference: F8-F11 test the sdiff.c LAW,
+    # not the four-corner allocator, so they must hold onto that controller.
+    ctrl = make_configs(vp, tp_f, tp_r, cp)[2]
     Tmax = vp.T_wheel_max
 
     # F1: no limits active — pure split.
@@ -658,6 +662,91 @@ def section_f():
           abs(d.g_left_appl - (1.0 - cp.rate * 0.01)) < 1e-9,
           f"g_left after one step {d.g_left_appl:.4f} "
           f"(limit {1.0 - cp.rate * 0.01:.4f})")
+
+
+def section_f2():
+    """The four-corner allocator's limit chain — F12..F16."""
+    vp, tp_f, tp_r, cp = default_setup()
+    T_max = vp.T_wheel_max
+    alloc = make_configs(vp, tp_f, tp_r, cp)[1]
+    openc = make_configs(vp, tp_f, tp_r, cp)[0]
+    s = [0.0] * NSTATES
+    s[IVX] = 15.0
+    for j in IW:
+        s[j] = 15.0 / vp.r_wheel
+
+    # F12: with the law switched off the allocator IS an open differential —
+    # exactly T_req/4 at every corner. This is why the baseline config shares
+    # this code path instead of being a separate class.
+    d = openc.update(s, 0.1, 400.0, 0.01)
+    check("F12", "law off → exact even four-way split (an open diff)",
+          all(abs(t - 100.0) < 1e-12 for t in d.T),
+          " / ".join(f"{t:.6f}" for t in d.T) + " N·m for a 400 N·m request")
+
+    # F13: unsaturated, the allocation is conserved — nothing is invented or
+    # lost between the request and the four commands.
+    d = alloc.update(s, 0.0, 400.0, 0.01)
+    check("F13", "unsaturated: the four commands sum to the request",
+          abs(sum(d.T) - 400.0) < 1e-9,
+          f"Σ T = {sum(d.T):.6f} vs 400 N·m requested, split "
+          f"{d.T_FL + d.T_FR:.1f} front / {d.T_RL + d.T_RR:.1f} rear")
+
+    # F14: THE invariant the limit chain exists for. The per-motor power clip
+    # is |T| <= P/omega, so it always bites the FASTER wheel first — which in a
+    # corner is the OUTER wheel, the one a yaw split just gave more torque to.
+    # Clipping each wheel independently after a difference-preserving shift
+    # shrinks the split and can INVERT it. Check the axle difference keeps its
+    # sign through the whole chain at a speed where the clip is active.
+    w_fast = (100.0, 140.0, 100.0, 140.0)
+    T_req4 = (200.0, 300.0, 200.0, 300.0)      # outer wheel asked for more
+    T_out, _ = alloc._apply_limits4(T_req4, w_fast, 32.0)
+    d_in = T_req4[1] - T_req4[0]
+    d_out_f = T_out[1] - T_out[0]
+    d_out_r = T_out[3] - T_out[2]
+    check("F14", "per-motor power clip cannot invert an axle's torque split",
+          d_out_f > 0.0 and d_out_r > 0.0,
+          f"requested ΔT {d_in:+.0f} → delivered {d_out_f:+.1f} front / "
+          f"{d_out_r:+.1f} rear at ω = 100/140 rad/s (a naive per-wheel clip "
+          f"gives −30.1 here — sign inverted)")
+
+    # F15: every hard limit is respected simultaneously.
+    ok_T = all(-T_max - 1e-6 <= t <= T_max + 1e-6 for t in T_out)
+    ok_P = all(abs(t * w) <= vp.motor_P_peak + 1e-6
+               for t, w in zip(T_out, w_fast))
+    ok_tot = sum(t * w for t, w in zip(T_out, w_fast)) <= vp.P_total_max + 1e-6
+    check("F15", "four-wheel limits: per-wheel torque, per-motor power, total cap",
+          ok_T and ok_P and ok_tot,
+          f"peak |T| {max(abs(t) for t in T_out):.1f} ≤ {T_max:.0f} N·m; peak "
+          f"per-motor {max(abs(t * w) for t, w in zip(T_out, w_fast)) / 1e3:.1f} ≤ "
+          f"{vp.motor_P_peak / 1e3:.0f} kW; total "
+          f"{sum(t * w for t, w in zip(T_out, w_fast)) / 1e3:.1f} ≤ "
+          f"{vp.P_total_max / 1e3:.0f} kW")
+
+    # F16: the 80 kW rules cap is STRUCTURALLY unreachable, and saying so is
+    # more useful than a check that cannot fail.
+    head = vp.driven_wheels * vp.motor_P_peak - vp.P_total_max
+    info("F16", "the total power cap has zero headroom and cannot fire",
+         f"driven_wheels × motor_power_peak = "
+         f"{vp.driven_wheels * vp.motor_P_peak / 1e3:.0f} kW vs a "
+         f"{vp.P_total_max / 1e3:.0f} kW cap — headroom {head / 1e3:.0f} kW. The "
+         "per-motor clip already implies the total, so the rules branch is dead "
+         "code at these numbers. It stays because motor_power_peak is a DERIVED "
+         "estimate (kit curves scaled to 380 V, three methods spanning "
+         "18.1–20.3 kW) — a dyno above 20 kW makes the cap live.")
+
+    # F17: the axle split follows the estimated load split, and that estimate
+    # tracks the plant's own wheel_loads() including the AERO term.
+    model = VehicleModel(vp, MagicFormulaTire(tp_f), MagicFormulaTire(tp_r))
+    worst = 0.0
+    for vx in (5.0, 15.0, 25.0):
+        for ax in (-5.0, 0.0, 5.0, 10.0):
+            Fz = model.wheel_loads(vx, ax, 0.0)
+            want = (Fz[0] + Fz[1]) / sum(Fz)
+            worst = max(worst, abs(axle_load_fraction(vp, vx, ax) - want))
+    check("F17", "allocator's load estimate matches the plant's wheel_loads",
+          worst < 1e-12,
+          f"worst front-share error {worst:.1e} over vx = 5…25 m/s, "
+          "ax = −5…10 m/s² (aero included — dropping it costs 3.3 points at 1.2 g)")
 
 
 # ═══════════════════════ G. in-run invariant audit (standard maneuvers)
@@ -898,7 +987,8 @@ def main():
                      ("C. slip kinematics", section_c),
                      ("D. EOM & integration", section_d),
                      ("E. vs bicycle model", section_e),
-                     ("F. controller limits", section_f),
+                     ("F. controller limits (s-diff)", section_f),
+                     ("F2. four-corner allocator limits", section_f2),
                      ("G. in-run audit", section_g),
                      ("H. VCU-rate robustness", section_h),
                      ("I. sensor stack", section_i)):

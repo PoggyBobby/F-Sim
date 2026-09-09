@@ -33,7 +33,7 @@ import numpy as np
 
 from model.params import G
 from model.physical.vehicle import front_steer_angles
-from style import (CONFIG_COLORS, STATUS_CRITICAL, SPIN_KAPPA_FALLBACK,
+from style import (color_for, STATUS_CRITICAL, SPIN_KAPPA_FALLBACK,
                    INK, INK_2, MUTED, ASPHALT, SURFACE,
                    config_lw, config_z)
 
@@ -44,11 +44,22 @@ CHANNELS = ("X", "Y", "psi", "delta", "kRL", "kRR", "r", "vx",
 # direct-label placement per config, in units of the camera half-window, so
 # the labels stay readable (and apart) at any zoom level
 LABEL_OFFSETS = {
-    "open (50/50)": (0.0, 0.20),
-    "s-diff": (0.26, -0.16),
+    "open 4WD": (0.0, 0.20),
+    "4-corner AWD": (0.26, -0.16),
+    "s-diff (RWD ref)": (-0.26, -0.16),
     "VCU (SIL)": (0.0, 0.34),
 }
-SHORT_NAMES = {"open (50/50)": "open", "s-diff": "s-diff", "VCU (SIL)": "VCU"}
+SHORT_NAMES = {"open 4WD": "open", "4-corner AWD": "AWD",
+               "s-diff (RWD ref)": "RWD", "VCU (SIL)": "VCU"}
+
+
+def label_offset(name):
+    """Direct-label placement, with a fallback so an unknown config renders."""
+    return LABEL_OFFSETS.get(name, (0.0, -0.30))
+
+
+def short_name(name):
+    return SHORT_NAMES.get(name, name[:8])
 
 
 def _rot(pts, ang):
@@ -149,7 +160,7 @@ def animate_maneuver(plt, maneuver, results, vp, tire_rear, outpath, fps=30,
 
     art = {}
     for name in names:
-        color = CONFIG_COLORS[name]
+        color = color_for(name)
         z = config_z(name)
         trail, = ax_map.plot([], [], color=color, lw=1.6, alpha=0.45, zorder=z)
         arms = [ax_map.plot([], [], color=INK_2, lw=1.4, alpha=0.75,
@@ -164,14 +175,14 @@ def animate_maneuver(plt, maneuver, results, vp, tire_rear, outpath, fps=30,
                         edgecolor=SURFACE, lw=0.8, zorder=z + 11)
             ax_map.add_patch(w)
             wheels.append(w)
-        label = ax_map.text(0, 0, SHORT_NAMES.get(name, name), color=INK,
+        label = ax_map.text(0, 0, short_name(name), color=INK,
                             fontsize=8.5, ha="center", va="center",
                             zorder=z + 20,
                             bbox=dict(boxstyle="round,pad=0.22", fc=SURFACE,
                                       ec=color, lw=1.1, alpha=0.92))
         art[name] = {"trail": trail, "body": body, "wheels": wheels,
                      "arms": arms, "label": label,
-                     "off": LABEL_OFFSETS.get(name, (0.0, 0.2))}
+                     "off": label_offset(name)}
 
     # ── overview: the whole path, fixed limits ──────────────────────────
     ax_over.set_title("Whole trajectory", fontsize=9.5)
@@ -180,9 +191,9 @@ def animate_maneuver(plt, maneuver, results, vp, tire_rear, outpath, fps=30,
     ax_over.tick_params(labelsize=8)
     for name in names:
         log = results[name]["log"]
-        ax_over.plot(log["X"], log["Y"], color=CONFIG_COLORS[name],
+        ax_over.plot(log["X"], log["Y"], color=color_for(name),
                      lw=config_lw(name) - 0.7, zorder=config_z(name))
-    dots = {n: ax_over.plot([], [], "o", color=CONFIG_COLORS[n], ms=5.5,
+    dots = {n: ax_over.plot([], [], "o", color=color_for(n), ms=5.5,
                             mec=SURFACE, mew=1.0, zorder=6)[0] for n in names}
     ax_over.set_aspect("equal", adjustable="datalim")
 
@@ -198,9 +209,9 @@ def animate_maneuver(plt, maneuver, results, vp, tire_rear, outpath, fps=30,
     k_peak_seen = 0.0
     for name in names:
         log = results[name]["log"]
-        ax_yaw.plot(log["t"], log["r"], color=CONFIG_COLORS[name],
+        ax_yaw.plot(log["t"], log["r"], color=color_for(name),
                     lw=config_lw(name) - 0.4, zorder=config_z(name))
-        ax_slip.plot(log["t"], log["kRL"], color=CONFIG_COLORS[name],
+        ax_slip.plot(log["t"], log["kRL"], color=color_for(name),
                      lw=config_lw(name) - 0.4, zorder=config_z(name))
         k_peak_seen = max(k_peak_seen, float(np.max(np.abs(log["kRL"]))))
 
@@ -222,7 +233,7 @@ def animate_maneuver(plt, maneuver, results, vp, tire_rear, outpath, fps=30,
                for ax in (ax_yaw, ax_slip)]
 
     # ── legend: identity by color, plus the one reserved status color ───
-    handles = [Line2D([], [], color=CONFIG_COLORS[n], lw=3, label=n)
+    handles = [Line2D([], [], color=color_for(n), lw=3, label=n)
                for n in names]
     handles.append(Line2D([], [], color=STATUS_CRITICAL, lw=3,
                           label=f"rear wheel spinning (|κ| > {k_spin:.2f})"))
@@ -267,7 +278,7 @@ def animate_maneuver(plt, maneuver, results, vp, tire_rear, outpath, fps=30,
             A["trail"].set_data(d["X"][:i + 1], d["Y"][:i + 1])
             dx, dy = A["off"]
             A["label"].set_position((X + dx * hw, Y + dy * hw))
-            A["label"].set_text(SHORT_NAMES.get(name, name) +
+            A["label"].set_text(short_name(name) +
                                 ("  ✕ spun" if d["spun"] and not d["alive"][i]
                                  else ""))
             dots[name].set_data([X], [Y])

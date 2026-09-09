@@ -28,13 +28,13 @@ the two REAR ones are active in the current build, 4WD is the goal. The same
 controller math applies per axle — extension noted in README.md.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from model.config import cfg
 from model.config import G, RHO_AIR   # re-exported; the sim imports these here
 
-__all__ = ["VehicleParams", "TireParams", "ControlParams", "default_setup",
-           "G", "RHO_AIR"]
+__all__ = ["VehicleParams", "TireParams", "ControlParams", "AllocParams",
+           "default_setup", "G", "RHO_AIR"]
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -134,6 +134,30 @@ class TireParams:
 # Controller constants — controllers/python/params.yaml
 # ─────────────────────────────────────────────────────────────────────────
 @dataclass
+class AllocParams:
+    """Four-corner allocator constants — controllers/python/awd/params.yaml.
+
+    A SIM DESIGN OUTPUT. Deliberately a separate dataclass from ControlParams
+    so the boundary with the firmware mirror is structural rather than a
+    comment: nothing in here exists in sdiff.c, and nothing in ControlParams
+    may be tuned by this sim."""
+    frac_front_base: float = cfg.controllers.awd.frac_front_base
+    k_load: float = cfg.controllers.awd.k_load
+    frac_front_min: float = cfg.controllers.awd.frac_front_min
+    frac_front_max: float = cfg.controllers.awd.frac_front_max
+    frac_rate: float = cfg.controllers.awd.frac_rate
+    ax_est_max: float = cfg.controllers.awd.ax_est_max
+    load_exponent: float = cfg.controllers.awd.load_exponent
+    share_min: float = cfg.controllers.awd.share_min
+    ay_ff_frac: float = cfg.controllers.awd.ay_ff_frac
+    ay_est_max: float = cfg.controllers.awd.ay_est_max
+    kappa_lim: float = cfg.controllers.awd.kappa_lim
+    k_spin: float = cfg.controllers.awd.k_spin
+    spin_floor: float = cfg.controllers.awd.spin_floor
+    spin_release_rate: float = cfg.controllers.awd.spin_release_rate
+
+
+@dataclass
 class ControlParams:
     # open-loop s-diff (sdiff.c) — see controllers/python/params.yaml.
     # delta_max and deadband are road-wheel ANGLES: entered in the YAML as the
@@ -146,6 +170,8 @@ class ControlParams:
     f_min: float = cfg.controllers.f_min
     deadband: float = cfg.controllers.deadband
     rate: float = cfg.controllers.rate
+    # --- the sim's own four-corner allocator (NOT a firmware mirror) --------
+    awd: AllocParams = field(default_factory=AllocParams)
 
 
 def default_setup():

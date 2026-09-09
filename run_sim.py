@@ -25,12 +25,12 @@ import matplotlib
 from model.params import default_setup
 from model.physical.tires.tire import MagicFormulaTire
 from model.physical.vehicle import VehicleModel
-from controllers.python.torque_split import make_configs
+from controllers.python.torque_allocator import make_configs
 from model.maneuvers.maneuvers import step_steer, corner_exit, slalom, pedal_check
 from model.maneuvers.tracks import track_maneuvers, model_for, CORNER_TYPES
 import model.maneuvers.tracks as _tracks
 from model.sim import run_matrix, print_table
-from style import RC, CONFIG_COLORS, REF_COLOR, config_lw, config_z
+from style import RC, color_for, REF_COLOR, config_lw, config_z
 import runlog
 from runlog import RunRecorder
 
@@ -43,7 +43,7 @@ def _plot_series(ax, results, xkey, ykey, transform=None):
     for name, res in results.items():
         log = res["log"]
         y = log[ykey] if transform is None else transform(log)
-        ax.plot(log[xkey], y, color=CONFIG_COLORS[name], lw=config_lw(name),
+        ax.plot(log[xkey], y, color=color_for(name), lw=config_lw(name),
                 zorder=config_z(name), label=name)
 
 
@@ -69,7 +69,7 @@ def plot_response(plt, maneuver, results, outdir, tag=""):
     ax = axs[0, 1]
     for name, res in results.items():
         log = res["log"]
-        ax.plot(log["X"], log["Y"], color=CONFIG_COLORS[name],
+        ax.plot(log["X"], log["Y"], color=color_for(name),
                 lw=config_lw(name), zorder=config_z(name))
     ax.set_title("Path over the ground (plan view)\n"
                  "(wider arc = the car yawed less than asked)", fontsize=10)

@@ -15,6 +15,20 @@ Generated from the `params.yaml` files — regenerate with `.venv/bin/python par
 | `aero.cd_coeff` | `model/physical/aero/params.yaml` | FROM REPORT |
 | `aero.cl_coeff` | `model/physical/aero/params.yaml` | FROM REPORT |
 | `aero.frontal_area` | `model/physical/aero/params.yaml` | FROM REPORT |
+| `controllers.awd.ax_est_max` | `controllers/python/awd/params.yaml` | TUNED (sim) |
+| `controllers.awd.ay_est_max` | `controllers/python/awd/params.yaml` | NUMERICAL GUARD |
+| `controllers.awd.ay_ff_frac` | `controllers/python/awd/params.yaml` | TUNED (sim) |
+| `controllers.awd.frac_front_base` | `controllers/python/awd/params.yaml` | TUNED (sim) |
+| `controllers.awd.frac_front_max` | `controllers/python/awd/params.yaml` | TUNED (sim) |
+| `controllers.awd.frac_front_min` | `controllers/python/awd/params.yaml` | TUNED (sim) |
+| `controllers.awd.frac_rate` | `controllers/python/awd/params.yaml` | TUNED (sim) |
+| `controllers.awd.k_load` | `controllers/python/awd/params.yaml` | TUNED (sim) |
+| `controllers.awd.k_spin` | `controllers/python/awd/params.yaml` | TUNED (sim) |
+| `controllers.awd.kappa_lim` | `controllers/python/awd/params.yaml` | TUNED (sim) |
+| `controllers.awd.load_exponent` | `controllers/python/awd/params.yaml` | TUNED (sim) |
+| `controllers.awd.share_min` | `controllers/python/awd/params.yaml` | NUMERICAL GUARD |
+| `controllers.awd.spin_floor` | `controllers/python/awd/params.yaml` | TUNED (sim) |
+| `controllers.awd.spin_release_rate` | `controllers/python/awd/params.yaml` | TUNED (sim) |
 | `controllers.deadband` | `controllers/python/params.yaml` | CURRENT CAR |
 | `controllers.delta_max` | `controllers/python/params.yaml` | SUSPECT |
 | `controllers.f_min` | `controllers/python/params.yaml` | CURRENT CAR |

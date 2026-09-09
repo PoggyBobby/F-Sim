@@ -196,10 +196,10 @@ power_cap_total:
 
 driven_wheels:
   label:  "Driven wheels"
-  value:  2
+  value:  4
   unit:   "-"
   symbol: n_drv
-  status: CURRENT CAR (four motors fitted, the rear pair commissioned)
+  status: CURRENT CAR (four motors fitted, one per upright)
   what: >
     How many wheels receive drive torque. 4 = one motor per upright; 2 = the
     rear pair only, which is what the current build runs.

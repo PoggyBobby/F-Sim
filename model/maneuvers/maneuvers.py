@@ -75,8 +75,15 @@ def corner_exit(delta_deg=8.0, vx0=10.0, t_ramp0=1.5, t_ramp1=3.0,
     rear grip, and no left/right split fixes an axle that is past its total
     limit (that needs traction control, deliberately out of scope here)."""
     if T_max_total is None:
-        from model.params import VehicleParams
-        T_max_total = 0.45 * VehicleParams().T_drive_max
+        from model.config import cfg
+        from model.params import VehicleParams, G
+        # 35% of what the TIRES can take (mu_x*m*g*r_w), not of what the
+        # motors can deliver. The motor count is a drivetrain decision and it
+        # has already changed once; the point of this maneuver — ask for more
+        # than the inside wheel can put down on corner exit — is a property of
+        # the tires, so it should be pinned to them.
+        vp_ = VehicleParams()
+        T_max_total = 0.35 * cfg.tires.mu0_long * vp_.m_total * G * vp_.r_wheel
     d = math.radians(delta_deg)
 
     def f(t):
