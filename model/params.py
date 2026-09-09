@@ -23,9 +23,10 @@ Conventions (ISO 8855):
     Wheel order everywhere in the code: [FL, FR, RL, RR].
     Left-side wheels sit at y = +track/2, right-side at y = -track/2.
 
-Drive layout (team-confirmed 2026-08-30): four motors fitted, one per wheel;
-the two REAR ones are active in the current build, 4WD is the goal. The same
-controller math applies per axle — extension noted in README.md.
+Drive layout (team-confirmed 2026-08-30): four motors fitted, one per wheel.
+The sim drives all four as of 2026-09-09 — the plant takes four wheel torques
+and a rear-drive car is simply zero on the fronts. `driven_wheels` sets what
+100% throttle MEANS (n * T_wheel_max); it is not used by the plant.
 """
 
 from dataclasses import dataclass, field

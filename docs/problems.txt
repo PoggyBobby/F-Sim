@@ -149,6 +149,20 @@ B. REAL OUTPUT EFFECT
 C. DEFECTS — LARGEST OUTPUT EFFECT OF ANYTHING HERE
 ===================================================
 
+    ALL THREE FIXED 2026-09-09, in one commit, before the AWD work began.
+    None was covered by verify.py — the audit was 80/80 before and after —
+    which is exactly why they survived this long. Kept below with their
+    original descriptions because the CONSEQUENCES outlive the fixes:
+
+      * every track and split-mu result recorded before that commit is
+        INVALID. BUG 1 meant the corner tests ran on ~17 N*m of drag
+        feedforward instead of the apex step; the first honest run of
+        90deg R=6 immediately showed peak |kappa| = 13.3.
+      * BUG 2 also means every maneuver was being simulated TWICE, so
+        run_sim.py was ~2x slower than it needed to be.
+      * BUG 3 means every runs/index.csv row written before the fix has
+        total_mass_kg = nan and an empty tire_mu0.
+
 BUG 1  model/sim.py:76 kills the closed-loop track driver
     Lines 74-76 read:
         delta, T_req = (driver(t, s) if driver is not None
@@ -302,3 +316,62 @@ SUGGESTED ORDER
   6. Defer #6 and #7 until there is a baseline to retune against.
   7. Defer #4 until the suspension team delivers roll rates and roll-centre
      heights.
+
+
+G. FINDINGS FROM THE AWD WORK (2026-09-09)
+==========================================
+
+#9  The 80 kW rules cap is dead code, at 2WD and at 4WD alike
+    driven_wheels * motor_power_peak = 4 * 20 kW = 80 kW = power_cap_total,
+    EXACTLY. The per-motor clip already guarantees |T_i * w_i| <= P_peak for
+    every wheel, so the total is implied and the branch cannot fire; the
+    four-wheel power curve sits on 80.0 kW at every wheel speed. The
+    drivetrain YAML's claim that "the 80 kW cap is unreachable until 4WD" was
+    wrong in both directions and has been rewritten.
+    Kept implemented because motor_power_peak is DERIVED from kit curves
+    scaled to 380 V by three methods spanning 18.1-20.3 kW — a dyno above
+    20 kW makes the cap live. verify F16 reports the zero headroom as an
+    info line rather than pretending a check passes.
+
+#10 The per-motor power clip inverts the yaw split, and always has
+    |T| <= P/omega bites the FASTER wheel first — the outer one, which any
+    yaw split has just given MORE torque. Applying it per-wheel after a
+    difference-preserving shift turns a requested +100 N*m into -30.1 at
+    omega = 100/140. verify F7 has been reporting the two-motor symptom as
+    "finding #3" (requested dT 120, delivered 2.9 at 32 m/s) without naming
+    the cause. Fixed in the four-corner allocator by capping the axle
+    difference against the tighter of its two power headrooms BEFORE fitting
+    the mean; verify F14 pins it. The two-motor _apply_limits() is untouched,
+    so the RWD reference still shows the original behaviour.
+
+#11 A load-proportional left/right split has a stability cliff that MOVES
+    WITH TORQUE
+    More torque to the loaded outer wheel makes a yaw moment into the corner;
+    past a point that is oversteer, not vectoring. Worse, the moment scales
+    with the torque being split, so an exponent that is safe at one throttle
+    level is not safe at a higher one. Swept on corner_exit at 100 Hz:
+    p = 0.4 and 0.5 are stable at a 30%-of-grip request and SPIN at 35%.
+    Shipped at p = 0.3, the largest value stable across the range.
+    THE TRAP: dw RMSE improves monotonically right across the cliff, so any
+    sweep tuned on the objective alone walks straight off it. Every sweep
+    here needs a stability column.
+    Not fixed, bounded: the exponent has no torque awareness. A
+    yaw-rate-referenced term (torque_vectoring.py has the reference model)
+    would bound the moment directly instead of bounding its cause.
+
+#12 Two plotting bugs, both fixed
+    plot_wheels panel (0,1) plotted kRL and called it "inner-rear" — true
+    only in a LEFT-hand corner, so --track-right and the slalom's second half
+    were quietly showing the OUTER wheel. And the power panel had "@ 380 V"
+    baked into an f-string next to a hardcoded 2-motor ceiling, so the label
+    would have lied the moment pack_voltage moved.
+
+#13 Guard-expression quirks in the plant, NOT fixed
+    Two pre-existing inconsistencies now apply to four wheels instead of two:
+    slip ANGLE uses max(vcx, v_eps) (signed) while slip RATIO uses
+    max(|vcx|, v_eps) (absolute); and the slip ratio's numerator is signed
+    while its denominator is absolute, so kappa inverts sign relative to the
+    force direction once vcx < 0. Neither is reachable in any current
+    maneuver. A third case is new: at Fz = 0 the tire returns (0, 0), so a
+    LIFTED driven wheel has dw/dt = T/I with no reaction at all and lands
+    with a large slip ratio. verify G9 counts it (0 today, min Fz = 279 N).

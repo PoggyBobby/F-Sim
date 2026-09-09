@@ -14,10 +14,11 @@ The repo is **private** and cannot be made public as-is — see `docs/PUBLISHING
 # first-time setup
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 
-# the physics audit — 80 independent cross-checks, ~90 s, exit 1 on any failure
+# the physics audit — the check count and runtime are printed at the end
+# (130 checks, ~3 min at the time of writing); exit 1 on any failure
 .venv/bin/python verify.py
 
-# the sim (defaults to all four scripted maneuvers, both configs)
+# the sim (defaults to all four scripted maneuvers, all three configs)
 .venv/bin/python run_sim.py --no-animate          # skip video (~25 s/maneuver)
 .venv/bin/python run_sim.py --maneuver step_steer --no-animate
 .venv/bin/python run_sim.py --perfect-state --no-animate   # bypass sensors
@@ -93,28 +94,43 @@ Sections: A tire model · B vertical loads · C slip kinematics · D EOM & integ
 
 - **ISO 8855 / SAE J670**: x forward, **y LEFT**, z up. Positive yaw rate = nose swings left. Positive steer = left turn.
 - Wheel order is always **FL, FR, RL, RR**. Left wheels at y = +track/2.
-- State vector is 8 wide, indices exported from `model/physical/vehicle.py`: `IX, IY, IPSI, IVX, IVY, IR, IWRL, IWRR = range(8)`. Import those constants; never index by literal.
+- State vector is 10 wide, indices exported from `model/physical/vehicle.py`: `IX, IY, IPSI, IVX, IVY, IR, IWFL, IWFR, IWRL, IWRR = range(10)`, plus `IW = (IWFL, IWFR, IWRL, IWRR)` so `IW[i]` lines up with wheel index `i` everywhere. Import those constants; never index by literal.
 - Slip ratio κ uses the **SAE** form `(ω·r_w − v)/v`, unbounded — say which convention you're quoting when talking to the full-model team (κ = 67 here reads ~0.985 under the textbook's bounded form).
 
 ### The plant
 
-`model/physical/vehicle.py` — planar two-track, 8 states, front wheels are undriven free-rollers (which is why this sim cannot do braking or 4WD). Vertical loads depend on accelerations which depend on tire forces which depend on loads; the algebraic loop is closed by **3 fixed-point iterations** per force evaluation. `model/physical/tires/tire.py` is a simplified Pacejka with load-sensitive µ and a friction **ellipse** (separate µx/µy, fitted µx/µy = 0.91 from TTC Round 9). `model/sim.py` is fixed-step RK4 at dt = 0.25 ms with zero-order-hold inputs; the small step is set by the wheel-spin time constant (~6 ms).
+`model/physical/vehicle.py` — planar two-track, 10 states, **all four wheels driven**: `derivatives(s, delta, T_wheel)` takes four wheel torques in FL, FR, RL, RR order and a rear-drive car is simply zero on the fronts. There is no drive-layout flag in the plant. Mechanical braking is still not modelled — the BPS commands regen only, through the motors, so what AWD added is regen on four wheels rather than braking.
+
+  A front wheel is no longer massless. The old free-roller matched ground speed instantly and made no longitudinal force; a real spin state lags its contact-patch speed, so the fronts now make force in every transient — 2·I_w/r_w² = 13.4 kg of apparent mass, 5.3% of the car. `verify.py` D1 measures exactly that against a closed-form coast-down at 0.1% (the *wrong*, two-wheel `m_eff` is 0.638% away, so the old 1% tolerance could not tell them apart). Vertical loads depend on accelerations which depend on tire forces which depend on loads; the algebraic loop is closed by **3 fixed-point iterations** per force evaluation. `model/physical/tires/tire.py` is a simplified Pacejka with load-sensitive µ and a friction **ellipse** (separate µx/µy, fitted µx/µy = 0.91 from TTC Round 9). `model/sim.py` is fixed-step RK4 at dt = 0.25 ms with zero-order-hold inputs; the small step is set by the wheel-spin time constant (~6 ms).
 
 ### Controller path — two update entry points
 
-`controllers/python/torque_split.py` exposes:
+Both `controllers/python/torque_allocator.py` (the default) and
+`controllers/python/torque_split.py` (the firmware mirror) expose:
 - `update(s, delta, T_req_total, dt)` — perfect-state feedback, used by `verify.py` and `--perfect-state`.
 - `update_from_sensors(sr, dt)` — **the default path.** Consumes `SensorReadings` only: wheel speeds from motor resolvers ÷ planetary, yaw rate from the filtered IMU gyro, road-wheel angle estimated through the SAS steer map, vx *estimated* from wheel speeds (no ground-speed sensor exists), torque request through the pedal map gated by the FSAE EV.4.7 APPS/BPS plausibility cut.
 
 `model/sensors/suite.py` owns the single seeded RNG, so every config sees identical noise — a fair fight, and runs are bit-exact repeatable (checked by verify I5).
 
-Both paths end in `_apply_limits()`: per-wheel peak torque (where the **base** torque shifts so the left/right *difference* survives — thrust is sacrificed before yaw authority), regen speed cutoff, per-motor power, then the 80 kW total rules cap.
+Both paths end in a limit chain — `_apply_limits()` in the two-motor mirror, `_apply_limits4()` in the allocator: per-wheel peak torque (where the **base** torque shifts so the left/right *difference* survives — thrust is sacrificed before yaw authority), regen speed cutoff, per-motor power, then the 80 kW total rules cap.
+
+`vx` is estimated in `model/sensors/vcu/vx_estimator.py`. With four driven wheels "the slowest driven wheel is closest to the truth" collapses — every wheel over-reads at once — so it refers each wheel to the CG (`v_i = w_i·r_w + r·y_i`, which alone removed most of the error) and gates the wheel correction on the residual spread, carrying the gap on the accelerometer. Worst error over `corner_exit` is 0.042 m/s against 0.605 for the naive pick.
 
 ### What the s-diff currently is
 
 The live s-diff is a **line-for-line Python port of `sdiff.c`** from the SRE-VCU **`S-diff`** branch (the one the gitlink pins and the SIL builds; `sdiff-sil` is a stale fork — see below) — deliberately open-loop on steering angle only, never reading wheel speeds. Same variable names as the C so the two can be diffed by eye.
 
-**`sdiff.c` works in road-wheel DEGREES.** `controllers/python/params.yaml` carries the same numbers as the C `#define`s under `unit: deg`, so the loader hands the controller radians and `delta / delta_max` matches the C's `delta_deg / DELTA_MAX` exactly. Don't "fix" this by adding a degrees conversion in `torque_split.py`. The constants mirror the firmware — when the C changes, they change; they are not a design output of this sim. Torque vectoring was removed on 2026-09-04 and parked in `controllers/python/torque_vectoring.py`, which **nothing imports**; that file carries its own re-enable instructions. `make_configs()` returns two configs: `open (50/50)` and `s-diff`.
+**`sdiff.c` works in road-wheel DEGREES.** `controllers/python/params.yaml` carries the same numbers as the C `#define`s under `unit: deg`, so the loader hands the controller radians and `delta / delta_max` matches the C's `delta_deg / DELTA_MAX` exactly. Don't "fix" this by adding a degrees conversion in `torque_split.py`. The constants mirror the firmware — when the C changes, they change; they are not a design output of this sim. Torque vectoring was removed on 2026-09-04 and parked in `controllers/python/torque_vectoring.py`, which **nothing imports**; that file carries its own re-enable instructions. `make_configs()` now lives in `controllers/python/torque_allocator.py` and returns three: `open 4WD`, `4-corner AWD` and `s-diff (RWD ref)`. **Append, never insert** — `verify.py` indexes it positionally.
+
+### The four-corner allocator — a design output, not a firmware mirror
+
+`controllers/python/torque_allocator.py` is the default controller. Its constants live in `controllers/python/awd/params.yaml` under `namespace: controllers.awd`, deliberately separate from `controllers/python/params.yaml` so the `sdiff.c` mirror stays uncontaminated. Nothing in the allocator exists in the firmware; nothing in it may be tagged `CURRENT CAR`.
+
+Three stages: axle split following the estimated normal-load split; left/right by estimated corner load with exponent `load_exponent` (0 is exactly an open diff, which is how the baseline config is built); a per-corner spin guard. Both acceleration estimates are **derived, never measured** — `ax` feed-forward from the request, `ay` from yaw rate plus a kinematic steer term — so the perfect-state and sensor paths stay structurally identical and nothing measured can feed back into the split and oscillate.
+
+**`load_exponent` sits below a stability cliff, and the cliff moves with torque.** More torque to the loaded outer wheel makes a yaw moment into the corner; past a point that is oversteer, not vectoring. The parameter's `note:` carries the sweep with a stability column at three request levels — the objective (Δω RMSE) improves monotonically *right across* the cliff, so tuning on it alone walks straight off.
+
+**The real limiter is the per-motor power clip, not the 80 kW cap.** The clip bites the faster (outer) wheel first, so applying it per-wheel after a difference-preserving shift inverts the split: 200/300 at ω 100/140 comes back as 173/143. The axle difference is therefore capped against the tighter of its two headrooms first (`verify.py` F14). Meanwhile `driven_wheels × motor_power_peak` equals `power_cap_total` exactly, so the rules cap is dead code and F16 says so as an info line rather than pretending to test it.
 
 ### SIL — the real firmware in the loop
 
@@ -124,21 +140,23 @@ The live s-diff is a **line-for-line Python port of `sdiff.c`** from the SRE-VCU
 
 `run.sh` gates the sim on `verify.py` — **if any check fails the sim does not run.** `runlog.py` records each run under `runs/NNN__date__label/` with a full parameter snapshot (values + provenance), test points, time-series CSVs, plots, replay videos, a CHANGED/UNCHANGED diff against the previous run, and source-file hashes. Nothing is overwritten; `runs/index.csv` and `runs/all_metrics.csv` accumulate. `runs/` is gitignored, so runs referenced in the docs (007, 008) no longer exist as artifacts.
 
-## Known live defects — check before trusting results
+## Known defects — check before trusting results
 
-`docs/problems.txt` §C documents three bugs that are **still unfixed in `main`**:
+The three `docs/problems.txt` §C defects were **fixed on 2026-09-09** (they were outside `verify.py`'s coverage, which is why they survived):
 
-1. `model/sim.py:76` unconditionally overwrites the closed-loop `driver(t, s)` call two lines above it. `TrackDriver` is dead code — every `--maneuver tracks` run uses the drag-only open-loop fallback, so all corner results are meaningless.
-2. `run_sim.py:412` overwrites the `model_for(man, model)` call at line 405, discarding the split-µ plant. The split-µ test runs on a uniform-µ car, at double the compute.
-3. `runlog.py:625-627` reads pre-restructure parameter keys (`CAR_MASS_NO_DRIVER`, `TIRE_MU0`) instead of dotted config paths, so `total_mass_kg` is `nan` and `tire_mu0` is empty in every `runs/index.csv` row.
+1. `model/sim.py` overwrote the closed-loop `driver(t, s)` call on the next line, so `TrackDriver` was dead code and every `--maneuver tracks` run used the drag-only fallback. **Every track and split-µ result recorded before that commit is invalid.**
+2. `run_sim.py` discarded the `model_for(man, model)` result, so the split-µ test ran on a uniform-µ plant at double the compute.
+3. `runlog.py` read pre-restructure parameter keys, so `total_mass_kg` was `nan` and `tire_mu0` empty in every `runs/index.csv` row.
 
-The rad/deg divergence in `controllers/python/params.yaml` (which made the inner/outer split unreachable and reduced the s-diff to a flat ~5% cut) was **fixed on 2026-09-08**; so were the three stale `sdiff-sil` assumptions in the SIL host layer (SAS calibration, RL/RR CAN IDs, uncalibrated brake).
+The rad/deg divergence in `controllers/python/params.yaml` was **fixed on 2026-09-08**; so were the three stale `sdiff-sil` assumptions in the SIL host layer (SAS calibration, RL/RR CAN IDs, uncalibrated brake).
 
 Two live findings came out of that work, both **in the firmware, neither fixed**:
 
-1. **No safety condition reduces torque on `S-diff`.** `SafetyChecker_reduceTorque()` computes `multiplier` correctly — including `multiplier = 0` for any fault, HVIL loss, or the EV.4.7 APPS/BPS implausibility — and then discards it: the four `powertrain->motor_* = ... * multiplier` lines at the end of the function are commented out (upstream `4c164a7`, "commenting out cutting off motors", still commented at `5df1baf`). Confirmed in the SIL: at 50% APPS with the brakes at 40 bar the fault flag `F_tpsbpsImplausible` sets and both rear motors stay at full 35000 mA. This is rules-critical (EV.4.7 / EV.5.7).
+1. **No safety condition reduces torque on `S-diff`.** `SafetyChecker_reduceTorque()` computes `multiplier` correctly — including `multiplier = 0` for any fault, HVIL loss, or the EV.4.7 APPS/BPS implausibility — and then discards it: the four `powertrain->motor_* = ... * multiplier` lines at the end of the function are commented out (upstream `4c164a7`, "commenting out cutting off motors", still commented at `5df1baf`). Confirmed in the SIL: at 50% APPS with the brakes at 40 bar the fault flag `F_tpsbpsImplausible` sets and both rear motors stay at full 35000 mA. This is rules-critical (EV.4.7 / EV.5.7) — and **under AWD it gets worse**, since those four commented-out lines name all four motors, so the failure now fails to cut four.
 2. **`DELTA_MAX` is probably a typo.** It went `25 → 2` in `ba13d61`, a commit whose message is "refactor comments and formatting in sdiff.h for clarity". `25` ≈ the 23.2° full-lock angle and would make the derate progressive; `2` saturates it at ~10.8° of handwheel, so the s-diff is close to on/off. It survived PNR runs #1–#3. `params.yaml` mirrors the current value and tags it `SUSPECT`.
 
 ## Documentation drift
 
-`README.md` and `docs/BREAKDOWN.md` predate the TV removal and the s-diff rewrite. They describe **four** configs (open / s-diff / TV / s-diff+TV), a PI wheel-speed s-diff with an 80 N·m `DT_SDIFF_MAX` clamp, and a TV gain table — none of which exist in the code. They also cite `car_data.py`, `controllers.py` and `sensors.py`, which the restructure replaced with `model/config.py`, `controllers/python/` and `model/sensors/`, and quote 69 or 78 verification checks where the real count is 80. `sil/vcu_sil.py`'s docstring still claims the SIL config feeds zero torque to the plant; it has fed torque since the `motor_kt` commit. Treat `docs/BREAKDOWN.md` as authoritative on **physics and parameter provenance**, and the code as authoritative on **controllers and configs**.
+`README.md` and the `docs/guide/*` stubs are thin: **eight of the ten guide files are 0 bytes** (`controller.md`, `conventions.md`, `file-map.md`, `glossary.md`, `interop-vehiclesim.md`, `known-defects.md`, `sil.md`, `what-this-is.md`), and `docs/BREAKDOWN.md`, `docs/FINDINGS.md` and `PROGRESS.md` — all still cited by `docs/problems.txt` §A/§D — **no longer exist**. Treat this file and `docs/problems.txt` as the live documentation; filling the guide stubs is separate, unstarted work.
+
+`run.sh` no longer quotes a check count: `verify.py` prints its own, so the number cannot go stale again.

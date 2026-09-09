@@ -4,6 +4,32 @@ before running in the actual car.
 Note that there are a few fidelity errors and data mismatches that should be tuned and handled before the controller
 is actually tested on the car. 
 
+### All-wheel drive (2026-09-09)
+
+The car has four AMK motors, one per upright, and the sim now drives all four.
+The plant carries a wheel-spin state per corner and `derivatives()` takes four
+wheel torques in FL, FR, RL, RR order; a rear-drive car is simply zero on the
+fronts, and there is no drive-layout flag.
+
+Three configs are compared in every run:
+
+    open 4WD           an even four-way split — an open differential
+    4-corner AWD       the four-corner allocator (the default)
+    s-diff (RWD ref)   the two-motor sdiff.c mirror, for comparison
+
+Why the allocator is not just "the s-diff twice": load transfer takes the front
+axle from 43.4% of the car's weight at rest to 28.3% at 1 g, so at 0.8 g a front
+tire saturates at 162 N·m while a rear takes 311 — with 273 N·m available at
+every motor. An even split therefore spins the fronts and wastes nearly half the
+rear axle. The allocator picks front/rear from estimated load before it picks
+anything left/right. Its constants live in `controllers/python/awd/params.yaml`
+and are a design output of this sim, NOT a mirror of the firmware — unlike
+`controllers/python/params.yaml`, which tracks the `#define`s in `sdiff.c`.
+
+Measured on corner exit: four driven wheels are worth about 2 m/s of exit speed
+over the two-motor car, and the allocator takes ~40% off peak wheel slip versus
+an even split at no speed cost.
+
 ## Commands to run
 
 ```
@@ -63,7 +89,7 @@ $EDITOR controllers/python/params.yaml      # the tuned controller gains
 .venv/bin/python -c "from model.config import cfg; print(cfg.tires.mu0)"
 .venv/bin/python -c "import json; from model.config import cfg; print(json.dumps(cfg.meta('mass.car_no_driver'), indent=2))"
 
-# list every number that is still a guess, 16 of them
+# list every number that is still a guess
 .venv/bin/python -c "
 from model.config import cfg
 for p in cfg.params():
@@ -73,7 +99,9 @@ for p in cfg.params():
 # needs the restricted .mat files in ttc/, gitignored, member teams only
 .venv/bin/python tire_fit.py --cornering ttc/*run31.mat --drivebrake ttc/*run72.mat --pressure 12 --out ttc/fit_hoosier_r20
 
-# build the real vcu firmware and run it as a fifth config
+# build the real vcu firmware and run it as a fourth config
+# (its two rear commands are MIRRORED onto the fronts — sim-side
+#  assumption, not firmware behaviour; summary() says so each run)
 git submodule update --init sil/SRE-VCU
 make -C sil
 .venv/bin/python run_sim.py --sil --maneuver step_steer --no-animate

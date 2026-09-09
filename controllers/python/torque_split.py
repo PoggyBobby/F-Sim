@@ -1,4 +1,16 @@
-"""Torque-split controllers: open diff and software differential.
+"""The two-motor s-diff — a line-for-line mirror of sdiff.c, kept as a reference.
+
+THIS IS NO LONGER THE DEFAULT CONTROLLER. The sim drives four wheels; see
+controllers/python/torque_allocator.py. This module stays because it is what
+the SIL is diffed against and because it is the only way to attribute a metric
+change to AWD rather than to the allocator. Its constants track the firmware
+and must never be tuned here.
+
+Note it now runs on a four-wheel plant with a four-motor pedal map, so it
+saturates above ~50% APPS: two motors cannot deliver a four-motor request.
+That is the comparison, not a bug — every config gets the same T_req_total from
+the maneuver and the rear-drive car simply cannot put it down.
+
 
 With two independent rear motors there is no mechanical differential — the
 "differential" is whatever the software decides the left/right torque split
