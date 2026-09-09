@@ -11,10 +11,28 @@ it run its power-up sequence — bench check, ADC settle — by feeding idle
 frames until the firmware's own clock passes VCU_SIL_BOOT_S. Only then
 does the maneuver's t = 0 begin.
 
-The firmware commands the custom inverters in duty cycle or current, not
-torque, and nothing feeds the sim's sensors into it yet. So for now the
-plant receives ZERO torque from this config; the raw commands are counted
-and reported (summary()) so the link is visibly alive.
+The firmware commands the inverters in duty cycle or current, not torque, so
+the sim converts: T_wheel = mA x motor_kt x gear_ratio, clipped to the
+per-wheel peak. (motor_kt is a PLACEHOLDER — everything this config puts on
+the plant is scaled by an unmeasured number.)
+
+FOUR WHEELS, TWO COMMANDS. The plant is AWD but this firmware is a two-motor
+build: powertrainControl.c zeroes motor_fl/motor_fr at construction and nothing
+ever writes them, and the CAN capture in sil/host/sil_link.c only knows
+0x100 (RL) and 0x101 (RR). So the SIM mirrors each rear command onto the
+same-side front — T_FL = T_RL, T_FR = T_RR. That is a SIM-SIDE assumption
+about how a four-motor firmware would behave, NOT observed VCU behaviour, and
+it doubles the total thrust this config puts down. summary() says so on every
+run so nobody reads a four-motor SIL trace as firmware truth.
+
+The firmware is already structurally ready for the real thing:
+powertrainControl.h declares PowertrainMode { ... AWD = 3 ... } and a
+_Powertrain with motor_fl/fr/rl/rr. Wiring it properly needs three things,
+none of them ours: front inverter CAN IDs in sil/host/sil_link.c, rpm_FL/FR
+and cmd_FL/FR added to the S and T lines in sil/host/sil_link.h, and a mode
+that writes the front fields. Worth doing alongside the standing finding that
+SafetyChecker_reduceTorque() computes its multiplier and discards it
+(safety.c:688-691) — under AWD that failure fails to cut four motors, not two.
 """
 
 import os
@@ -117,8 +135,14 @@ class SilController:
         T_max = self.vp.T_wheel_max
         T_RL = max(-T_max, min(T_max, cmd_RL * k))
         T_RR = max(-T_max, min(T_max, cmd_RR * k))
-        dbg = ControllerDebug(T=(0.0, 0.0, T_RL, T_RR))
+        # mirror each rear command onto the same-side front — see the module
+        # docstring. Sim-side assumption, not firmware behaviour.
+        dbg = ControllerDebug(T=(T_RL, T_RR, T_RL, T_RR))
         dbg.dw_target = sr.yaw_rate * self.vp.track_r / self.vp.r_wheel   # diagnostic only
+        # the firmware's internal split is not observable over the S/T link, so
+        # every allocator-specific debug field stays at its default rather than
+        # being filled with a plausible-looking guess
+        dbg.f_applied = 0.5          # true by construction under mirroring
         return dbg
 
     def summary(self):
@@ -129,4 +153,7 @@ class SilController:
             parts.append(f"{MODE_NAMES[mode]} x{n}"
                          + (f" ({unit[mode]})" if mode in unit else ""))
         return ("VCU command frames per cycle: " + ", ".join(parts)
-                + f" — torque to plant = mA x Kt x gear ({self.vp.motor_kt} N·m/A x {self.vp.gear_ratio:g}), clipped to ±{self.vp.T_wheel_max:.0f} N·m")
+                + f" — torque to plant = mA x Kt x gear ({self.vp.motor_kt} N·m/A"
+                + f" x {self.vp.gear_ratio:g}), clipped to ±{self.vp.T_wheel_max:.0f} N·m;"
+                + " FRONTS MIRRORED from the rears (T_FL = T_RL, T_FR = T_RR)"
+                + " — the firmware commands two motors, not four")
