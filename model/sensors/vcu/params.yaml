@@ -55,3 +55,37 @@ seed:
   need:   "-"
   how:    "-"
   why:    Fair comparisons and reproducible runs.
+
+vx_tau:
+  label:  "vx estimator time constant"
+  value:  0.15
+  unit:   s
+  symbol: tau_vx
+  status: TUNED (sim)
+  what:   How fast the wheel-speed measurement pulls the ground-speed estimate.
+  need:   "-"
+  how:    Corner exit at high throttle — shortest tau that still rides out a spin event
+  why: >
+    Short enough that the estimate cannot drift far on the accelerometer alone,
+    long enough that one quantization LSB of wheel speed does not shake the
+    slip ratios a traction guard reads. Applied as dt/(dt+tau), so the filter
+    behaves identically at the 100 Hz VCU rate and the 4 kHz rate verify I4 uses.
+
+vx_spread_ref:
+  label:  "Wheel-speed scatter reference"
+  value:  1.5
+  unit:   m/s
+  symbol: "-"
+  status: TUNED (sim)
+  what: >
+    Spread between fastest and slowest wheel (as ground speed) at which the
+    estimator stops trusting the wheels and coasts on the accelerometer.
+  need:   "-"
+  how:    Track tests — the largest HONEST spread that corner geometry produces
+  why: >
+    With four DRIVEN wheels there is no undriven reference left: under power
+    every wheel over-reads, so min(w)*r_wheel is no longer a lower bound on
+    ground speed. Scatter is the signal that says "some corner is slipping".
+    1.5 m/s sits above the r*track difference real cornering produces (about
+    0.6 m/s at 1 rad/s) and below a genuine spin event.
+

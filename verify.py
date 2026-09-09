@@ -857,6 +857,20 @@ def section_i():
          f"dw RMSE {metrics(la, vp)['dw RMSE [rad/s]']:.4f} vs perfect "
          f"{yp:.4f} — noise + VCU rate + estimation all included")
 
+    # I7: the ground-speed estimate must beat the naive wheel-only pick, and
+    # must stay bounded through a traction event. With four driven wheels
+    # min(w)*r_w is no longer a lower bound on ground speed, so this is the
+    # check that catches a revert to it.
+    li = simulate(model, make_configs(vp, tp_f, tp_r, cp)[1], corner_exit(),
+                  sensors=SensorSuite(vp), ctrl_every=40)
+    err_est = float(np.abs(li["vx_est"] - li["vx"]).max())
+    wheel_only = np.minimum(li["wRL"], li["wRR"]) * vp.r_wheel
+    err_wss = float(np.abs(wheel_only - li["vx"]).max())
+    check("I7", "vx estimate is bounded and beats the wheel-only pick",
+          err_est < 1.0 and err_est < err_wss,
+          f"worst |vx_est − vx| = {err_est:.3f} m/s vs {err_wss:.3f} m/s for "
+          f"min(driven wheels)·r_w over corner_exit")
+
     # I6: pedal map round trip. DriverAdapter turns the maneuver's requested
     # torque into an APPS percentage and the controller turns it back; the two
     # are exact inverses ONLY while both scale by the same driven-wheel count.

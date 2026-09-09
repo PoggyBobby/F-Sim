@@ -30,6 +30,7 @@ from model.sensors.imu_6axis.imu import Imu6Axis
 from model.sensors.steering_angle.sas import SteeringAngleSensor, steer_map_deg
 from model.sensors.throttle_pos.apps import ThrottlePositionSensor
 from model.sensors.wheel_speed.wss import WheelSpeedSensor
+from model.sensors.vcu.vx_estimator import VxEstimator
 
 import numpy as np
 
@@ -52,6 +53,7 @@ class SensorSuite:
         self.wss = tuple(WheelSpeedSensor(vp.gear_ratio, noise=noise)
                          for _ in range(4))
         self.imu = Imu6Axis(self.rng, noise=noise)
+        self.vx_est = VxEstimator()
 
     def measure(self, s, driver: DriverInputs, info, dt_vcu: float,
                 braking: bool) -> SensorReadings:
@@ -75,14 +77,19 @@ class SensorSuite:
         r.yaw_rate, r.ax, r.ay = self.imu.read(
             s[IR], info["ax"], info["ay"], dt_vcu)
 
-        # VCU estimates: road-wheel angle via the map; vx from wheel speeds
+        # VCU estimates: road-wheel angle via the map; ground speed from the
+        # four wheel speeds, gated on how far they disagree and carried through
+        # the disagreement by the accelerometer (see vx_estimator.py).
         r.steer_est = math.radians(steer_map_deg(r.handwheel_deg))
-        wl, wr = r.wheel_speed_RL, r.wheel_speed_RR
-        w_pick = max(wl, wr) if braking else min(wl, wr)
-        r.vx_est = max(w_pick * vp.r_wheel, 0.0)
+        r.vx_est = self.vx_est.update(
+            [getattr(r, "wheel_speed_" + nm) for nm in WHEEL_NAMES],
+            r.ax, dt_vcu, braking, vp.r_wheel, r.yaw_rate,
+            (0.5 * vp.track_f, -0.5 * vp.track_f,
+             0.5 * vp.track_r, -0.5 * vp.track_r))
         return r
 
     def reset(self):
         self.imu.reset()
+        self.vx_est.reset()
         self.rng = np.random.default_rng(cfg.sensors.vcu.seed)
         self.imu.rng = self.rng

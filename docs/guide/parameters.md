@@ -68,6 +68,8 @@ Generated from the `params.yaml` files — regenerate with `.venv/bin/python par
 | `sensors.vcu.plaus_apps_restore` | `model/sensors/vcu/params.yaml` | RULES VALUE |
 | `sensors.vcu.rate_hz` | `model/sensors/vcu/params.yaml` | PLACEHOLDER |
 | `sensors.vcu.seed` | `model/sensors/vcu/params.yaml` | NUMERICAL GUARD |
+| `sensors.vcu.vx_spread_ref` | `model/sensors/vcu/params.yaml` | TUNED (sim) |
+| `sensors.vcu.vx_tau` | `model/sensors/vcu/params.yaml` | TUNED (sim) |
 | `sensors.wheel_speed.quant_rpm` | `model/sensors/wheel_speed/params.yaml` | PLACEHOLDER |
 | `sil.boot_s` | `sil/params.yaml` | PLACEHOLDER |
 | `steering.ackermann_fraction` | `model/physical/steering/params.yaml` | PLACEHOLDER |
