@@ -154,16 +154,25 @@ def simulate(model: VehicleModel, controller, maneuver, dt=2.5e-4, log_every=4,
 def metrics(log, p):
     """Scalar summary of one run — used for the comparison table."""
     dw_act = log["wRR"] - log["wRL"]
+    dwf_act = log["wFR"] - log["wFL"]
     out = {
         # body sideslip: big values = the rear stepping out
         "max |beta| [deg]": float(np.degrees(np.max(np.abs(log["beta"])))),
         # how well the rear wheel-speed difference matched corner geometry
         "dw RMSE [rad/s]": float(np.sqrt(np.mean((log["dw_target"] - dw_act) ** 2))),
+        # the front axle's own kinematic target carries a cos(delta): both front
+        # wheels share x = a, so the sin(delta) terms cancel in the difference
+        "dw_f RMSE [rad/s]": float(np.sqrt(np.mean(
+            (log["dw_target"] * (p.track_f / p.track_r) * np.cos(log["delta"])
+             - dwf_act) ** 2))),
         # worst wheel slip — inner-wheel spin shows up here
         # worst wheel — now genuinely any of four, not just the driven rears
         "max |kappa| [-]": float(np.max(np.abs(np.stack(
             [log["k" + nm] for nm in WHEEL_NAMES])))),
         "max |ay| [g]": float(np.max(np.abs(log["ay"])) / 9.81),
+        # how close the run came to the rules cap — only meaningful once every
+        # wheel is driven
+        "max P [kW]": float(np.max(log["P_total"]) / 1e3),
     }
     return out
 
@@ -182,9 +191,14 @@ def run_matrix(model, controllers, maneuver, dt=2.5e-4, sensors=None,
     return results
 
 
+# the comparison table's columns. run_sim.py imports this rather than keeping
+# its own copy — they were two hand-maintained lists of the same thing.
+METRIC_COLS = ["max |beta| [deg]", "dw RMSE [rad/s]", "dw_f RMSE [rad/s]",
+               "max |kappa| [-]", "max |ay| [g]", "max P [kW]"]
+
+
 def print_table(maneuver, results):
-    cols = ["max |beta| [deg]", "dw RMSE [rad/s]",
-            "max |kappa| [-]", "max |ay| [g]"]
+    cols = METRIC_COLS
     name_w = max(len(n) for n in results) + 2
     print(f"\n=== {maneuver.name}  ({maneuver.description}) ===")
     header = "config".ljust(name_w) + "".join(c.rjust(19) for c in cols) + "  diverged?"

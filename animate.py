@@ -16,7 +16,7 @@ screen is the torque split and nothing else.
 Reading the picture:
   * body color = controller config (the same colors as every other figure);
   * front wheels turn with the actual steer input;
-  * a rear wheel turns RED once its slip ratio passes the peak-force slip of
+  * ANY wheel turns RED once its slip ratio passes the peak-force slip of
     the tire model — past that point more wheel speed makes LESS force, which
     is the inner-wheel spin-up the software diff exists to prevent. The
     threshold is asked of the tire, not hardcoded, so it tracks the tire data;
@@ -38,8 +38,8 @@ from style import (color_for, STATUS_CRITICAL, SPIN_KAPPA_FALLBACK,
                    config_lw, config_z)
 
 # body-frame channels resampled onto the animation's time grid
-CHANNELS = ("X", "Y", "psi", "delta", "kRL", "kRR", "r", "vx",
-            "T_RL", "T_RR")
+CHANNELS = ("X", "Y", "psi", "delta", "kFL", "kFR", "kRL", "kRR", "r", "vx",
+            "T_FL", "T_FR", "T_RL", "T_RR")
 
 # direct-label placement per config, in units of the camera half-window, so
 # the labels stay readable (and apart) at any zoom level
@@ -84,15 +84,28 @@ def _wheel_polygon(r_wheel):
                      (r_wheel, 0.11), (-r_wheel, 0.11)])
 
 
+def spin_thresholds(vp, tire_front, tire_rear):
+    """Slip ratio at which each axle's wheel is called 'spinning' — the tire
+    model's own peak-force slip at that axle's static wheel load.
+
+    Per AXLE, not one number: kappa_at_peak is load-dependent, and the front
+    carries less weight, so the fronts peak slightly LATER (0.0997 vs 0.0972 on
+    this car). One line across a four-wheel slip panel is wrong at whichever
+    load you computed it."""
+    out = []
+    for tire, frac in ((tire_front, vp.weight_frac_front),
+                       (tire_rear, 1.0 - vp.weight_frac_front)):
+        try:
+            k = float(tire.kappa_at_peak(vp.m_total * G * frac / 2.0))
+            out.append(k if k > 1e-3 else SPIN_KAPPA_FALLBACK)
+        except Exception:
+            out.append(SPIN_KAPPA_FALLBACK)
+    return tuple(out)
+
+
 def spin_threshold(vp, tire_rear):
-    """Slip ratio at which a rear wheel is called 'spinning' — the tire
-    model's own peak-force slip at the static rear wheel load."""
-    try:
-        Fz = vp.m_total * G * (1.0 - vp.weight_frac_front) / 2.0
-        k = float(tire_rear.kappa_at_peak(Fz))
-        return k if k > 1e-3 else SPIN_KAPPA_FALLBACK
-    except Exception:
-        return SPIN_KAPPA_FALLBACK
+    """Rear-axle threshold only — kept for callers that want a single number."""
+    return spin_thresholds(vp, tire_rear, tire_rear)[1]
 
 
 def _resample(results, tgrid):
@@ -129,7 +142,9 @@ def animate_maneuver(plt, maneuver, results, vp, tire_rear, outpath, fps=30,
     tgrid = np.arange(0.0, maneuver.duration + 1e-9, 1.0 / fps)
     data = _resample(results, tgrid)
     names = list(results.keys())
-    k_spin = spin_threshold(vp, tire_rear)
+    k_front, k_rear = spin_thresholds(vp, tire_rear, tire_rear)
+    k_axle = (k_front, k_front, k_rear, k_rear)
+    k_spin = min(k_front, k_rear)   # the worst axle, for the reference line
 
     fig = plt.figure(figsize=(13.5, 7.6))
     gs = fig.add_gridspec(3, 3, width_ratios=[2.05, 0.02, 1.0],
@@ -199,7 +214,7 @@ def animate_maneuver(plt, maneuver, results, vp, tire_rear, outpath, fps=30,
 
     # ── traces with a moving time cursor ────────────────────────────────
     for ax, title, ylab in ((ax_yaw, "Yaw rate vs reference", "r [rad/s]"),
-                            (ax_slip, "Inner-rear slip ratio", "κ_RL [-]")):
+                            (ax_slip, "Worst-corner slip ratio", "max |κ| [-]")):
         ax.set_title(title, fontsize=9.5)
         ax.set_ylabel(ylab, fontsize=8.5)
         ax.set_xlabel("time [s]", fontsize=8.5)
@@ -211,9 +226,11 @@ def animate_maneuver(plt, maneuver, results, vp, tire_rear, outpath, fps=30,
         log = results[name]["log"]
         ax_yaw.plot(log["t"], log["r"], color=color_for(name),
                     lw=config_lw(name) - 0.4, zorder=config_z(name))
-        ax_slip.plot(log["t"], log["kRL"], color=color_for(name),
+        k_worst = np.max(np.abs(np.stack(
+            [log["kFL"], log["kFR"], log["kRL"], log["kRR"]])), axis=0)
+        ax_slip.plot(log["t"], k_worst, color=color_for(name),
                      lw=config_lw(name) - 0.4, zorder=config_z(name))
-        k_peak_seen = max(k_peak_seen, float(np.max(np.abs(log["kRL"]))))
+        k_peak_seen = max(k_peak_seen, float(np.max(k_worst)))
 
     # only stretch the slip axis up to the spin threshold when a wheel got
     # anywhere near it — otherwise the real trace would be squashed flat
@@ -236,7 +253,7 @@ def animate_maneuver(plt, maneuver, results, vp, tire_rear, outpath, fps=30,
     handles = [Line2D([], [], color=color_for(n), lw=3, label=n)
                for n in names]
     handles.append(Line2D([], [], color=STATUS_CRITICAL, lw=3,
-                          label=f"rear wheel spinning (|κ| > {k_spin:.2f})"))
+                          label=f"wheel spinning (|κ| > {k_spin:.2f})"))
     fig.legend(handles=handles, loc="lower center", ncol=6, fontsize=9,
                bbox_to_anchor=(0.5, 0.0))
 
@@ -266,11 +283,12 @@ def animate_maneuver(plt, maneuver, results, vp, tire_rear, outpath, fps=30,
             A["body"].set_xy(_rot(body_tmpl, psi) + origin)
             dFL, dFR = front_steer_angles(vp, d["delta"][i])
             steers = (dFL, dFR, 0.0, 0.0)
-            kap = (0.0, 0.0, d["kRL"][i], d["kRR"][i])
+            kap = (d["kFL"][i], d["kFR"][i], d["kRL"][i], d["kRR"][i])
+            # front wheels judged against the front threshold, rears the rear
             for j, w in enumerate(A["wheels"]):
                 pts = _rot(wheel_tmpl, steers[j]) + wheel_xy[j]
                 w.set_xy(_rot(pts, psi) + origin)
-                spinning = abs(kap[j]) > k_spin
+                spinning = abs(kap[j]) > k_axle[j]
                 w.set_facecolor(STATUS_CRITICAL if spinning else INK_2)
                 w.set_linewidth(1.4 if spinning else 0.8)
                 seg = _rot(np.array([arm_root[j], wheel_xy[j]]), psi) + origin
