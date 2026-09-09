@@ -45,15 +45,19 @@ class SensorSuite:
         self.apps = ThrottlePositionSensor(noise=noise)
         self.bps = BrakePressureSensor(noise=noise)
         self.sas = SteeringAngleSensor(noise=noise)
-        self.wss_RL = WheelSpeedSensor(vp.gear_ratio, noise=noise)
-        self.wss_RR = WheelSpeedSensor(vp.gear_ratio, noise=noise)
+        # one per corner: same hardware everywhere (a resolver on the motor,
+        # a planetary in the upright). These draw NOTHING from the RNG — only
+        # the IMU does — so adding two cannot perturb the noise stream, which
+        # is what keeps verify I5's bit-exactness intact.
+        self.wss = tuple(WheelSpeedSensor(vp.gear_ratio, noise=noise)
+                         for _ in range(4))
         self.imu = Imu6Axis(self.rng, noise=noise)
 
     def measure(self, s, driver: DriverInputs, info, dt_vcu: float,
                 braking: bool) -> SensorReadings:
         """One VCU sample. `s` is the true state, `info` the latest force
         evaluation (for the accelerometer channels)."""
-        from model.physical.vehicle import IR, IWRL, IWRR
+        from model.physical.vehicle import IR, IW, WHEEL_NAMES
         vp, r = self.vp, SensorReadings()
 
         # pedals & steering — quantization only (they are digital senders)
@@ -62,8 +66,10 @@ class SensorSuite:
         r.handwheel_deg = self.sas.read(driver.handwheel_deg)
 
         # WSS: motor rpm over CAN (÷ planetary back to wheel speed)
-        r.motor_rpm_RL, r.wheel_speed_RL = self.wss_RL.read(s[IWRL])
-        r.motor_rpm_RR, r.wheel_speed_RR = self.wss_RR.read(s[IWRR])
+        for i, nm in enumerate(WHEEL_NAMES):
+            rpm, w = self.wss[i].read(s[IW[i]])
+            setattr(r, "motor_rpm_" + nm, rpm)
+            setattr(r, "wheel_speed_" + nm, w)
 
         # IMU: gyro noise + bias, then the VCU's first-order low-pass
         r.yaw_rate, r.ax, r.ay = self.imu.read(

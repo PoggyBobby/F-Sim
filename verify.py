@@ -796,13 +796,15 @@ def section_i():
     sen = SensorSuite(vp, noise=False)
     s = [0.0] * NSTATES
     s[IVX] = 15.0
-    s[IWRL], s[IWRR] = 60.0, 70.0   # fronts stay at 0 — not sensed yet
+    for j, w0 in zip(IW, (40.0, 50.0, 60.0, 70.0)):
+        s[j] = w0
     from model.sensors import DriverInputs
     sr = sen.measure(s, DriverInputs(), {"ax": 0, "ay": 0}, 0.01, False)
-    check("I2", "WSS: motor rpm → wheel speed chain exact (quantization off)",
-          abs(sr.wheel_speed_RL - 60.0) < 1e-12 and
-          abs(sr.wheel_speed_RR - 70.0) < 1e-12,
-          f"RL {sr.wheel_speed_RL:.6f}, RR {sr.wheel_speed_RR:.6f} rad/s")
+    got = [getattr(sr, "wheel_speed_" + nm) for nm in WHEEL_NAMES]
+    want = [40.0, 50.0, 60.0, 70.0]
+    check("I2", "WSS: motor rpm → wheel speed chain exact on all four corners",
+          max(abs(g - w) for g, w in zip(got, want)) < 1e-12,
+          " ".join(f"{nm} {g:.4f}" for nm, g in zip(WHEEL_NAMES, got)) + " rad/s")
     lsb = cfg.sensors.wheel_speed.quant_rpm * (math.pi / 30) / vp.gear_ratio
     info("I2", "WSS quantization at the wheel",
          f"1 motor-rpm LSB = {lsb * vp.r_wheel * 1000:.1f} mm/s of ground speed "
