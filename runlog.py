@@ -69,7 +69,9 @@ CODE_FILES = ("model/config.py", "model/params.py", "model/sim.py",
               "model/sensors/throttle_pos/apps.py",
               "model/sensors/brake_pressure_sens/bps.py",
               "model/maneuvers/maneuvers.py", "model/maneuvers/tracks.py",
+              "controllers/python/debug.py",
               "controllers/python/torque_split.py",
+              "sil/vcu_sil.py",
               "run_sim.py", "runlog.py", "animate.py", "style.py",
               "verify.py", "tire_fit.py") + DATA_FILES
 

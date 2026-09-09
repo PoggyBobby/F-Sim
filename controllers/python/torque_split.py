@@ -49,21 +49,9 @@ Two update paths exist:
 """
 
 import math
-from dataclasses import dataclass
 from model.params import VehicleParams, TireParams, ControlParams
 from model.physical.vehicle import IVX, IR, IWRL, IWRR
-
-
-@dataclass
-class ControllerDebug:
-    dw_target: float = 0.0    # target wheel-speed difference wRR-wRL [rad/s]
-    dT_sdiff: float = 0.0     # s-diff torque-split contribution [N·m]
-    delta_norm: float = 0.0   # |steer| / delta_max, 0..1
-    f_applied: float = 1.0    # shared friction-budget multiplier (slewed)
-    g_left_appl: float = 1.0  # left-wheel multiplier (slewed)
-    g_right_appl: float = 1.0 # right-wheel multiplier (slewed)
-    T_RL: float = 0.0
-    T_RR: float = 0.0
+from controllers.python.debug import ControllerDebug
 
 
 def clampf(x, lo, hi):
@@ -133,7 +121,7 @@ class TorqueSplitController:
             T_RL = T_RR = T_base
 
         T_RL, T_RR = self._apply_limits((T_RL + T_RR) / 2.0, T_RR - T_RL, vx, wRL, wRR)
-        dbg.T_RL, dbg.T_RR = T_RL, T_RR
+        dbg.T = (0.0, 0.0, T_RL, T_RR)   # rear drive: the fronts get nothing
         dbg.dT_sdiff = T_RR - T_RL
         return dbg
 

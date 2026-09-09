@@ -21,7 +21,7 @@ import os
 import subprocess
 
 from model.config import cfg
-from controllers.python.torque_split import ControllerDebug
+from controllers.python.debug import ControllerDebug
 
 # This module lives in sil/, next to the Makefile that builds the binary.
 SIL_EXE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -115,10 +115,10 @@ class SilController:
                                  abs(cmd_RL), abs(cmd_RR))
         k = self.vp.motor_kt * self.vp.gear_ratio / 1000.0   # N·m per mA at the wheel
         T_max = self.vp.T_wheel_max
-        dbg = ControllerDebug()
+        T_RL = max(-T_max, min(T_max, cmd_RL * k))
+        T_RR = max(-T_max, min(T_max, cmd_RR * k))
+        dbg = ControllerDebug(T=(0.0, 0.0, T_RL, T_RR))
         dbg.dw_target = sr.yaw_rate * self.vp.track_r / self.vp.r_wheel   # diagnostic only
-        dbg.T_RL = max(-T_max, min(T_max, cmd_RL * k))
-        dbg.T_RR = max(-T_max, min(T_max, cmd_RR * k))
         return dbg
 
     def summary(self):
