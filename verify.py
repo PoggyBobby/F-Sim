@@ -755,6 +755,10 @@ class AuditModel(VehicleModel):
 
     def __init__(self, *a, **k):
         super().__init__(*a, **k)
+        # the front tire's own peak-force slip at its static load — G8's
+        # reference, computed from the tire model so it moves when the fit does
+        self.k_peak_front = float(self.tires[0].kappa_at_peak(
+            self.p.m_total * G * self.p.weight_frac_front / 2.0))
         self.reset_audit()
 
     def reset_audit(self):
@@ -764,6 +768,8 @@ class AuditModel(VehicleModel):
         self.max_w = 0.0
         self.max_kappa = 0.0
         self.load_id_err = 0.0
+        self.airborne_driven = 0
+        self.min_vcx = float("inf")
 
     def derivatives(self, s, delta, T_wheel):
         ds, inf_ = super().derivatives(s, delta, T_wheel)
@@ -783,6 +789,11 @@ class AuditModel(VehicleModel):
                 self.mu_floor_hits += 1
         self.max_w = max([self.max_w] + [abs(s[j]) for j in IW])
         self.max_kappa = max([self.max_kappa] + [abs(k) for k in inf_["kappa"]])
+        for i in range(4):
+            if Fz[i] <= 0.0 and abs(T_wheel[i]) > 1e-9:
+                self.airborne_driven += 1
+        self.min_vcx = min([self.min_vcx]
+                           + [abs(v) for v in contact_speeds(self, s, delta)])
         return ds, inf_
 
 
@@ -792,7 +803,7 @@ def section_g():
     Tmax = vp.T_wheel_max
 
     for man in (step_steer(), corner_exit(), slalom()):
-        for ci in (0, 1):                       # open & s-diff
+        for ci in (0, 1, 2):                    # every shipped config
             audit.reset_audit()
             ctrl = make_configs(vp, tp_f, tp_r, cp)[ci]
             log = simulate(audit, ctrl, man, dt=2.5e-4)
@@ -810,6 +821,20 @@ def section_g():
             mot_rpm = audit.max_w * vp.gear_ratio / (math.pi / 30)
             check("G5", f"{nm}: motor speed under 20 krpm",
                   mot_rpm < 20000, f"peak {mot_rpm:.0f} rpm")
+            # G8: the fronts must not run away. Their peak-force slip is
+            # kappa_at_peak at the front static load; twice that is deep on the
+            # falling side of the curve, where more wheel speed buys LESS force.
+            k_f = max(np.abs(log["kFL"]).max(), np.abs(log["kFR"]).max())
+            check("G8", f"{nm}: front slip stays off the falling side",
+                  k_f < 2.0 * audit.k_peak_front,
+                  f"peak front |κ| {k_f:.4f} vs tire peak "
+                  f"{audit.k_peak_front:.4f}")
+            # G9: nothing may spin up while its tire is off the ground — a
+            # lifted wheel makes no reaction force, so dω/dt = T/I unopposed.
+            check("G9", f"{nm}: no wheel driven while airborne",
+                  audit.airborne_driven == 0,
+                  f"{audit.airborne_driven} evaluations with Fz = 0 and "
+                  "torque still commanded")
             if (man.slug, ci) == ("corner_exit", 0):
                 info("G6", f"{nm}: closest approach to wheel lift",
                      f"min Fz = {audit.min_Fz:.0f} N (0 = airborne wheel)")
@@ -827,10 +852,25 @@ def section_g():
     i0 = int(0.8 * len(log["t"]))
     dw_act = (log["wRR"] - log["wRL"])[i0:].mean()
     dw_kin = (log["r"][i0:] * vp.track_r / vp.r_wheel).mean()
-    check("G7", "open-diff wheels settle to the kinematic Δω by themselves",
+    check("G7", "open-diff REAR wheels settle to the kinematic Δω by themselves",
           abs(dw_act - dw_kin) / abs(dw_kin) < 0.25,
           f"actual {dw_act:.3f} vs kinematic {dw_kin:.3f} rad/s (gap = real "
           "slip-ratio difference from the torque split, not an error)")
+    # the FRONT axle's target carries a cos(delta): both front wheels share
+    # x = a, so the sin(delta) terms cancel in the difference. This is the
+    # stronger of the two — it exercises the steered projection, which the rear
+    # axle never touches.
+    dwf_act = (log["wFR"] - log["wFL"])[i0:].mean()
+    dwf_kin = (log["r"][i0:] * vp.track_f * np.cos(log["delta"][i0:])
+               / vp.r_wheel).mean()
+    check("G7", "open-diff FRONT wheels settle to r·track_f·cos δ / r_w",
+          abs(dwf_act - dwf_kin) / abs(dwf_kin) < 0.25,
+          f"actual {dwf_act:.3f} vs kinematic {dwf_kin:.3f} rad/s "
+          f"(cos δ correction {100 * (1 - np.cos(log['delta'][i0:]).mean()):.2f}%)")
+    info("G7", "closest approach to the low-speed slip guard",
+         f"min |v_cx| over the run = {audit.min_vcx:.2f} m/s against "
+         f"v_eps = {vp.v_eps:.2f} — below that the slip-ratio denominator is "
+         "floored and the wheel-spin states stiffen sharply")
 
 
 # ═══════════════════ H. controller at a realistic VCU rate
