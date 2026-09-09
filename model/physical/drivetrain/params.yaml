@@ -170,6 +170,27 @@ power_cap_total:
     Hard ceiling. The sim applies it to mechanical power (no drivetrain losses
     modeled) — the real car hits it ~10-15% earlier.
 
+driven_wheels:
+  label:  "Driven wheels"
+  value:  2
+  unit:   "-"
+  symbol: n_drv
+  status: CURRENT CAR (four motors fitted, the rear pair commissioned)
+  what: >
+    How many wheels receive drive torque. 4 = one motor per upright; 2 = the
+    rear pair only, which is what the current build runs.
+  need:   Which inverters are commissioned on the car
+  how:    "Powertrain: count enabled inverters"
+  why: >
+    The scale between "peak torque at ONE wheel" and "peak torque the driver
+    can ask for". Every axle-torque budget in the sim is n_drv * T_wheel_max:
+    the maneuver throttle steps, the APPS pedal map, the driver adapter's
+    exact inverse of it, and the plot ceilings.
+  note: >
+    NOT used by the plant. The plant has four wheel-torque inputs and a
+    rear-drive car is simply zero front torque — this number only sets how
+    much torque the DRIVER's 100% pedal means.
+
 regen_speed_cutoff:
   label:  "Regen speed cutoff"
   value:  1.4

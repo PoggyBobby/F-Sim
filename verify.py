@@ -703,6 +703,24 @@ def section_i():
          f"dw RMSE {metrics(la, vp)['dw RMSE [rad/s]']:.4f} vs perfect "
          f"{yp:.4f} — noise + VCU rate + estimation all included")
 
+    # I6: pedal map round trip. DriverAdapter turns the maneuver's requested
+    # torque into an APPS percentage and the controller turns it back; the two
+    # are exact inverses ONLY while both scale by the same driven-wheel count.
+    # If driver.py and the controller ever disagree (2 vs 4 motors), every
+    # sensor-vs-perfect-state comparison is silently confounded — this is the
+    # check that catches it.
+    adapter = DriverAdapter(vp)
+    worst = 0.0
+    for frac in np.linspace(0.0, 1.0, 21):
+        T_in = frac * vp.T_drive_max
+        apps = adapter.inputs(0.0, T_in).apps_pct
+        T_back = vp.T_drive_max * apps / 100.0     # the controller's pedal map
+        worst = max(worst, abs(T_back - T_in))
+    check("I6", "pedal map: driver adapter and controller are exact inverses",
+          worst < 1e-9,
+          f"worst round-trip error {worst:.1e} N·m over 0..{vp.T_drive_max:.0f} "
+          f"N·m ({vp.driven_wheels} driven wheels)")
+
 
 def main():
     print("FSAE-Sim physics verification — independent cross-checks")

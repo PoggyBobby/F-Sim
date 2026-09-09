@@ -23,6 +23,7 @@ Generated from the `params.yaml` files — regenerate with `.venv/bin/python par
 | `controllers.rate` | `controllers/python/params.yaml` | CURRENT CAR |
 | `controllers.steering_ratio` | `controllers/python/params.yaml` | CURRENT CAR |
 | `drivetrain.I_wheel` | `model/physical/drivetrain/params.yaml` | DERIVED |
+| `drivetrain.driven_wheels` | `model/physical/drivetrain/params.yaml` | CURRENT CAR |
 | `drivetrain.gear_ratio` | `model/physical/drivetrain/params.yaml` | FROM REPORT |
 | `drivetrain.motor_kt` | `model/physical/drivetrain/params.yaml` | PLACEHOLDER |
 | `drivetrain.motor_max_speed` | `model/physical/drivetrain/params.yaml` | CURRENT CAR |

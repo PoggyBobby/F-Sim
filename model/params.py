@@ -60,6 +60,7 @@ class VehicleParams:
     motor_P_peak: float = cfg.drivetrain.motor_power_peak
     P_total_max: float = cfg.drivetrain.power_cap_total
     regen_speed_cutoff: float = cfg.drivetrain.regen_speed_cutoff
+    driven_wheels: int = cfg.drivetrain.driven_wheels
     # aero
     ClA: float = cfg.aero.ClA
     CdA: float = cfg.aero.CdA
@@ -94,6 +95,15 @@ class VehicleParams:
     def T_wheel_max(self) -> float:
         """Peak torque available at ONE wheel (motor peak * gear ratio)."""
         return self.motor_T_peak * self.gear_ratio
+
+    @property
+    def T_drive_max(self) -> float:
+        """Peak torque the whole drivetrain can put on the ground: one wheel's
+        peak times the number of DRIVEN wheels. This is what 100% throttle
+        means — the pedal map, the driver adapter's exact inverse of it, and
+        every maneuver's torque budget all scale by it, so they must all read
+        this one property and never spell the motor count out again."""
+        return self.driven_wheels * self.T_wheel_max
 
 
 # ─────────────────────────────────────────────────────────────────────────

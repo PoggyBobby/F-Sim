@@ -151,7 +151,7 @@ class TorqueSplitController:
         elif braking:
             T_req = -cfg.sensors.brake_pressure_sens.t_regen_max * min(sr.bps_bar / cfg.sensors.brake_pressure_sens.range_bar, 1.0)
         else:
-            T_req = 2.0 * self.vp.T_wheel_max * sr.apps_pct / 100.0
+            T_req = self.vp.T_drive_max * sr.apps_pct / 100.0
 
         # pseudo-state holding ONLY what the sensors gave us
         from model.physical.vehicle import NSTATES, IVX, IR, IWRL, IWRR

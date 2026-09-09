@@ -76,7 +76,7 @@ def corner_exit(delta_deg=8.0, vx0=10.0, t_ramp0=1.5, t_ramp1=3.0,
     limit (that needs traction control, deliberately out of scope here)."""
     if T_max_total is None:
         from model.params import VehicleParams
-        T_max_total = 0.45 * 2.0 * VehicleParams().T_wheel_max
+        T_max_total = 0.45 * VehicleParams().T_drive_max
     d = math.radians(delta_deg)
 
     def f(t):

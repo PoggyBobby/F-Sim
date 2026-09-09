@@ -24,7 +24,7 @@ class DriverAdapter:
     pedals). Exact-inverse, so the plant sees the maneuver unchanged."""
 
     def __init__(self, vp: VehicleParams):
-        self.T_axle_max = 2.0 * vp.T_wheel_max
+        self.T_drive_max = vp.T_drive_max
 
     def inputs(self, delta_rad: float, T_req: float,
                pedals=None) -> DriverInputs:
@@ -34,7 +34,7 @@ class DriverAdapter:
             d.apps_pct, d.bps_bar = pedals
             return d
         if T_req >= 0.0:
-            d.apps_pct = 100.0 * min(T_req / self.T_axle_max, 1.0)
+            d.apps_pct = 100.0 * min(T_req / self.T_drive_max, 1.0)
         else:
             bps = cfg.sensors.brake_pressure_sens
             d.bps_bar = bps.range_bar * min(-T_req / bps.t_regen_max, 1.0)

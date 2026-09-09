@@ -216,7 +216,7 @@ def build_maneuvers(args, vp, interactive):
     sd, cd_, ld = _defaults(step_steer), _defaults(corner_exit), _defaults(slalom)
     # corner-exit throttle is stored as N·m in maneuvers.py (None = 45% of
     # peak); the user-facing knob is % of peak wheel torque
-    peak = 2.0 * vp.T_wheel_max
+    peak = vp.T_drive_max
     cd_throttle_pct = 45.0
 
     want = lambda slug: args.maneuver in ("all", slug)
@@ -418,7 +418,7 @@ def main():
         plots.append(plot_wheels(plt, man, results,
                                  os.path.join(run_dir, "plots"), tag=tag,
                                  k_spin=spin_threshold(vp, MagicFormulaTire(tp_r)),
-                                 p_ceiling_kw=2 * vp.motor_P_peak / 1e3))
+                                 p_ceiling_kw=vp.driven_wheels * vp.motor_P_peak / 1e3))
 
         if args.animate:
             from animate import animate_maneuver
