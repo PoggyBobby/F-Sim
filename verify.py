@@ -39,7 +39,7 @@ from model.physical.vehicle import (VehicleModel, front_steer_angles, NSTATES, I
                      IVX, IVY, IR, IWRL, IWRR)
 from controllers.python.torque_split import TorqueSplitController, make_configs
 from model.maneuvers.maneuvers import Maneuver, step_steer, corner_exit, slalom
-from model.sim import simulate, metrics, rk4_step
+from model.sim import simulate, metrics
 
 FAIL = []
 RESULTS = []
@@ -593,39 +593,6 @@ def section_g():
 
 
 # ═══════════════════ H. controller at a realistic VCU rate
-def simulate_ctrl_rate(model, controller, maneuver, dt, ctrl_every):
-    """sim.simulate, but the controller only runs every `ctrl_every` physics
-    steps (zero-order hold in between) — a VCU at its real update rate."""
-    p = model.p
-    controller.reset()
-    n = int(round(maneuver.duration / dt))
-    s = [0.0] * NSTATES
-    s[IVX] = maneuver.vx0
-    s[IWRL] = s[IWRR] = maneuver.vx0 / p.r_wheel
-    log = {k: [] for k in ("t", "r", "dw_target", "wRL", "wRR",
-                           "kRL", "kRR", "beta", "vx")}
-    T_RL = T_RR = 0.0
-    dbg = None
-    for k in range(n):
-        t = k * dt
-        delta, T_req = maneuver.inputs(t)
-        if k % ctrl_every == 0:
-            dbg = controller.update(s, delta, T_req, dt * ctrl_every)
-            T_RL, T_RR = dbg.T_RL, dbg.T_RR
-        k1, inf_ = model.derivatives(s, delta, T_RL, T_RR)
-        if k % 4 == 0:
-            log["t"].append(t)
-            log["r"].append(s[IR]); log["vx"].append(s[IVX])
-            log["dw_target"].append(dbg.dw_target)
-            log["wRL"].append(s[IWRL]); log["wRR"].append(s[IWRR])
-            log["kRL"].append(inf_["kappa"][2]); log["kRR"].append(inf_["kappa"][3])
-            log["beta"].append(math.atan2(s[IVY], max(s[IVX], 0.5)))
-        s = rk4_step(model, s, delta, T_RL, T_RR, dt, k1=k1)
-        if abs(s[IR]) > 8.0 or abs(s[IVY]) > 15.0:
-            break
-    return {k: np.asarray(v) for k, v in log.items()}
-
-
 def section_h():
     vp, tp_f, tp_r, cp = default_setup()
     model = VehicleModel(vp, MagicFormulaTire(tp_f), MagicFormulaTire(tp_r))
@@ -633,7 +600,7 @@ def section_h():
     rows = []
     for hz, every in (("4 kHz (as simulated)", 1), ("1 kHz", 4), ("100 Hz", 40)):
         ctrl = make_configs(vp, tp_f, tp_r, cp)[1]
-        log = simulate_ctrl_rate(model, ctrl, man, 2.5e-4, every)
+        log = simulate(model, ctrl, man, dt=2.5e-4, ctrl_every=every)
         dw_rmse = float(np.sqrt(np.mean(
             (log["dw_target"] - (log["wRR"] - log["wRL"])) ** 2)))
         finished = log["t"][-1] >= man.duration - 0.01
