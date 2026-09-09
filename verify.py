@@ -35,7 +35,9 @@ import numpy as np
 
 from model.params import VehicleParams, TireParams, ControlParams, default_setup, G, RHO_AIR
 from model.physical.tires.tire import MagicFormulaTire
-from model.physical.vehicle import (VehicleModel, front_steer_angles, NSTATES, IX, IY, IPSI,
+from model.physical.vehicle import (VehicleModel, front_steer_angles, NSTATES, NWHEELS,
+                                    IW, WHEEL_NAMES, free_rolling_omegas,
+                                    contact_speeds, IX, IY, IPSI,
                      IVX, IVY, IR, IWRL, IWRR)
 from controllers.python.torque_split import TorqueSplitController, make_configs
 from model.maneuvers.maneuvers import Maneuver, step_steer, corner_exit, slalom
@@ -204,7 +206,8 @@ def section_c():
     vx, vy, r, delta = 15.0, 0.4, 0.5, 0.06
     s = [0.0] * NSTATES
     s[IVX], s[IVY], s[IR] = vx, vy, r
-    s[IWRL] = s[IWRR] = vx / vp.r_wheel
+    for j, w0 in zip(IW, free_rolling_omegas(model, s, delta)):
+        s[j] = w0                      # all four rolling, kappa = 0 by construction
     Fz = model.wheel_loads(vx, 0.0, 0.0)
     w = model.tire_forces(s, delta, Fz)
     a_f_txt = delta - (vy + vp.a * r) / vx
@@ -224,16 +227,31 @@ def section_c():
     # this check used the CG speed and wrongly failed the sim. Set each rear
     # wheel to its own contact speed: κ must be ~0; then overspeed one by 10%.
     s3 = list(s)
-    s3[IWRL] = (vx - r * model.wheel_xy[2][1]) / vp.r_wheel
-    s3[IWRR] = (vx - r * model.wheel_xy[3][1]) / vp.r_wheel
+    for j, w0 in zip(IW, free_rolling_omegas(model, s, delta)):
+        s3[j] = w0
     w3 = model.tire_forces(s3, delta, Fz)
-    k_roll = max(abs(w3["kappa"][2]), abs(w3["kappa"][3]))
-    s3[IWRL] *= 1.10
+    k_roll = max(abs(k) for k in w3["kappa"])
+    s3[IW[0]] *= 1.10                       # overspeed FL — the STEERED wheel
     w4 = model.tire_forces(s3, delta, Fz)
-    check("C2", "per-wheel rolling → κ≈0; +10% overspeed → κ≈0.10",
-          k_roll < 1e-6 and abs(w4["kappa"][2] - 0.10) < 2e-3,
-          f"κ_roll = {k_roll:.2e}, κ_overspeed = {w4['kappa'][2]:.4f} "
-          "(the sim correctly uses per-wheel contact speed, incl. the r·y term)")
+    check("C2", "per-wheel rolling → κ≈0 on all four; +10% overspeed → κ≈0.10",
+          k_roll < 1e-6 and abs(w4["kappa"][0] - 0.10) < 2e-3,
+          f"κ_roll = {k_roll:.2e} (worst of 4), κ_overspeed = {w4['kappa'][0]:.4f} "
+          "(per-wheel contact speed incl. the r·y term, resolved along the "
+          "wheel's own heading)")
+
+    # C2b: the front rolling speed is a WHEEL-FRAME quantity. Building it the
+    # rear way — (vx − r·y)/r_w, ignoring the steer projection — must FAIL.
+    s_naive = list(s3)
+    s_naive[IW[0]] = (vx - r * model.wheel_xy[0][1]) / vp.r_wheel
+    s_naive[IW[1]] = (vx - r * model.wheel_xy[1][1]) / vp.r_wheel
+    w_naive = model.tire_forces(s_naive, delta, Fz)
+    k_naive = max(abs(w_naive["kappa"][0]), abs(w_naive["kappa"][1]))
+    vcx_f = contact_speeds(model, s, delta)[0]
+    check("C2b", "steered front rolls at v_cx/r_w, not (vx−r·y)/r_w",
+          k_naive > 1e-4,
+          f"the naive rear-style speed leaves κ = {k_naive:.2e} on the fronts "
+          f"at δ = {math.degrees(delta):.1f}° (v_cx = {vcx_f:.4f} vs "
+          f"vx − r·y = {vx - r * model.wheel_xy[0][1]:.4f} m/s)")
 
     # C3: the s-diff target. In a steady left turn the RIGHT (outer) wheel
     # must spin faster; target Δω = r·track/r_wheel from wheel path speeds
@@ -276,6 +294,24 @@ def section_c():
          "normal driving, real at full lock. ACKERMANN_FRACTION is still "
          "0.0 (parallel) pending the steering team's curve interpretation")
 
+    # C8: the zero-front-torque identity — the regression lever for the whole
+    # four-wheel change. With no front torque the front wheels must sit at
+    # kappa = 0 and make NO longitudinal force, i.e. reproduce the old
+    # free-roller branch exactly. (A steady-trim identity, not a trajectory
+    # claim: in a TRANSIENT the fronts legitimately make force — that is their
+    # rotational inertia, and D1 measures it against a closed form.)
+    s8 = list(s)
+    for j, w0 in zip(IW, free_rolling_omegas(model, s, delta)):
+        s8[j] = w0
+    w8 = model.tire_forces(s8, delta, Fz)
+    worst_fx = max(abs(w8["Fx_w"][0]), abs(w8["Fx_w"][1]))
+    worst_fy = max(abs(w8["Fy_w"][i] - model.tires[i].lateral(w8["alpha"][i], Fz[i]))
+                   for i in (0, 1))
+    check("C8", "zero front torque → fronts make no Fx and pure lateral Fy",
+          worst_fx < 1e-9 and worst_fy < 1e-9,
+          f"front |Fx_w| = {worst_fx:.1e} N, |Fy_w − lateral()| = {worst_fy:.1e} N "
+          "— combined(0, α, Fz) is bit-identically (0, lateral(α, Fz))")
+
     # C4: yaw moment sum — synthetic forces with a hand-computed answer.
     Mz_hand = 0.0
     forces = [(120.0, 800.0), (-40.0, 900.0), (300.0, 400.0), (250.0, 350.0)]
@@ -297,17 +333,21 @@ def section_d():
     model = VehicleModel(vp, MagicFormulaTire(tp_f), MagicFormulaTire(tp_r))
 
     # D1: coast-down. δ=0, T=0 → only drag decelerates. Closed form for
-    # dv/dt = −k·v²/m_eff with m_eff = m + 2·I_w/r_w² (the spinning rear
-    # wheels store rotational KE; fronts are massless free-rollers here).
+    # dv/dt = −k·v²/m_eff with m_eff = m + 2·(I_wf + I_wr)/r_w² — ALL FOUR
+    # wheels store rotational KE now that the fronts have a spin state.
     coast = Maneuver("coast", "coast", 3.0, 15.0, lambda t: (0.0, 0.0))
     ctrl = make_configs(vp, tp_f, tp_r, cp)[0]
     log = simulate(model, ctrl, coast, dt=2.5e-4)
     k = 0.5 * RHO_AIR * vp.CdA
-    m_eff = vp.m_total + 2 * vp.I_wheel_r / vp.r_wheel ** 2
+    m_eff = vp.m_total + 2 * (vp.I_wheel_f + vp.I_wheel_r) / vp.r_wheel ** 2
     v_pred = 15.0 / (1 + k * 15.0 * 3.0 / m_eff)
     v_sim = log["vx"][-1]
+    # 0.1%, not 1%: with 4 spinning wheels the WRONG (2-wheel) m_eff is only
+    # 0.63% away, so a 1% tolerance cannot tell the two apart and would pass
+    # either. At 0.1% this is the strongest single proof that the two new front
+    # spin states integrate correctly.
     check("D1", "coast-down matches closed-form drag solution (with wheel KE)",
-          abs(v_sim / v_pred - 1) < 0.01,
+          abs(v_sim / v_pred - 1) < 1e-3,
           f"vx(3 s): sim {v_sim:.3f} vs closed form {v_pred:.3f} m/s")
     check("D1", "coast stays perfectly straight",
           abs(log["r"]).max() < 1e-10 and abs(log["Y"]).max() < 1e-8,
@@ -462,7 +502,8 @@ def section_f():
     #   RL (inner) = T_base*f*g_in,  RR (outer) = T_base*f
     s = [0.0] * NSTATES
     s[IVX] = 10.0
-    s[IWRL] = s[IWRR] = 10.0 / vp.r_wheel
+    for j in IW:
+        s[j] = 10.0 / vp.r_wheel
     ctrl.reset()
     for _ in range(200):                     # 2 s at 10 ms — slew fully settled
         d = ctrl.update(s, +cp.delta_max, 200.0, 0.01)
@@ -522,8 +563,8 @@ class AuditModel(VehicleModel):
         self.max_kappa = 0.0
         self.load_id_err = 0.0
 
-    def derivatives(self, s, delta, T_RL, T_RR):
-        ds, inf_ = super().derivatives(s, delta, T_RL, T_RR)
+    def derivatives(self, s, delta, T_wheel):
+        ds, inf_ = super().derivatives(s, delta, T_wheel)
         Fz = inf_["Fz"]
         self.min_Fz = min(self.min_Fz, min(Fz))
         if min(Fz) > 0.0:
@@ -538,9 +579,8 @@ class AuditModel(VehicleModel):
                 inf_["Fy_w"][i] / (t.mu(Fz[i]) * Fz[i])))
             if t.mu(Fz[i]) <= 0.5 * t.p.mu0 + 1e-12:
                 self.mu_floor_hits += 1
-        self.max_w = max(self.max_w, abs(s[IWRL]), abs(s[IWRR]))
-        self.max_kappa = max(self.max_kappa, abs(inf_["kappa"][2]),
-                             abs(inf_["kappa"][3]))
+        self.max_w = max([self.max_w] + [abs(s[j]) for j in IW])
+        self.max_kappa = max([self.max_kappa] + [abs(k) for k in inf_["kappa"]])
         return ds, inf_
 
 
@@ -559,10 +599,9 @@ def section_g():
                   audit.load_id_err < 1e-9, f"worst {audit.load_id_err:.1e}")
             check("G2", f"{nm}: friction circle respected throughout",
                   audit.max_util <= 1.0 + 1e-9, f"peak util {audit.max_util:.3f}")
+            peak_T = max(np.abs(log["T_" + w]).max() for w in WHEEL_NAMES)
             check("G3", f"{nm}: torque commands inside ±T_wheel_max",
-                  np.abs(log["T_RL"]).max() <= Tmax + 1e-6 and
-                  np.abs(log["T_RR"]).max() <= Tmax + 1e-6,
-                  f"peak |T| {max(np.abs(log['T_RL']).max(), np.abs(log['T_RR']).max()):.0f} N·m")
+                  peak_T <= Tmax + 1e-6, f"peak |T| {peak_T:.0f} N·m (worst of 4)")
             check("G4", f"{nm}: total power under the 80 kW cap",
                   log["P_total"].max() <= vp.P_total_max * 1.001,
                   f"peak {log['P_total'].max() / 1e3:.1f} kW")
@@ -644,7 +683,7 @@ def section_i():
     sen = SensorSuite(vp, noise=False)
     s = [0.0] * NSTATES
     s[IVX] = 15.0
-    s[IWRL], s[IWRR] = 60.0, 70.0
+    s[IWRL], s[IWRR] = 60.0, 70.0   # fronts stay at 0 — not sensed yet
     from model.sensors import DriverInputs
     sr = sen.measure(s, DriverInputs(), {"ax": 0, "ay": 0}, 0.01, False)
     check("I2", "WSS: motor rpm → wheel speed chain exact (quantization off)",

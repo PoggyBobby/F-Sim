@@ -1,4 +1,4 @@
-"""Planar two-track (4-wheel) vehicle model with rear wheel-speed dynamics.
+"""Planar two-track (4-wheel) vehicle model with four wheel-speed dynamics.
 
 This is deliberately the MINIMUM physics for a software differential and
 torque vectoring to be meaningful:
@@ -6,8 +6,9 @@ torque vectoring to be meaningful:
   * 3-DOF rigid body in the plane: vx, vy, r  (+ X, Y, psi for plotting)
   * 4 tire contact patches with individual vertical loads
     (static + aero + quasi-static longitudinal & lateral load transfer)
-  * rear wheel rotational dynamics  I_w * dω/dt = T_wheel - r_w * Fx
-    -> wheel slip ratios exist, so an inner wheel CAN actually spin up,
+  * wheel rotational dynamics at all four corners,
+        I_w,i * dω_i/dt = T_i - r_w * Fx_i
+    -> every wheel has a slip ratio, so any wheel CAN actually spin up,
        which is the entire problem the s-diff solves
   * Magic-Formula tires with load sensitivity and a friction-circle cap
 
@@ -20,27 +21,45 @@ States (indices below):
     X, Y, psi : position [m] and heading [rad] in the ground frame
     vx, vy    : body-frame velocities [m/s] (x forward, y left)
     r         : yaw rate [rad/s], CCW (left turn) positive
-    wRL, wRR  : rear wheel angular speeds [rad/s]
+    wFL, wFR,
+    wRL, wRR  : wheel angular speeds [rad/s], order FL FR RL RR
 
 Equations of motion (body frame):
     m (dvx/dt - r vy) = ΣFx - F_drag
     m (dvy/dt + r vx) = ΣFy
     I_z dr/dt         = ΣM_z = Σ ( x_i F_y,i - y_i F_x,i )
 
-Front wheels are undriven free-rollers: they generate lateral force only
-(their spin state is not tracked). Rear wheels generate combined Fx/Fy from
-slip ratio and slip angle.
+EVERY wheel is driven: derivatives() takes four wheel torques in FL, FR, RL,
+RR order, and a rear-drive car is simply T_FL = T_FR = 0. There is no
+drive-layout flag in the plant.
+
+That is not the same as the old free-roller front, which was implicitly
+MASSLESS — it matched ground speed instantaneously and made no longitudinal
+force at all. A front wheel with a real spin state lags its contact-patch
+speed and therefore makes force in every transient, which is the car
+accelerating its own front wheels: 2*I_w/r_w^2 = 13.4 kg of apparent mass,
+5.3% of this car. verify.py D1 measures exactly that against a closed form.
+
+The front wheels are also STEERED, so two things differ from the rears:
+their slip ratio is built from the contact-patch speed resolved along the
+wheel's own heading (v_cx, not vx - r*y), and their drive force rotates into
+BOTH body axes, adding an x*Fy yaw-moment term the rear axle has no
+equivalent of. Neither needs special-casing — both fall out of the existing
+rotation once front Fx is nonzero.
 """
 
 import math
 from model.params import VehicleParams, G, RHO_AIR
 from model.physical.tires.tire import MagicFormulaTire
 
-# state vector indices
-IX, IY, IPSI, IVX, IVY, IR, IWRL, IWRR = range(8)
-NSTATES = 8
+# state vector indices. Wheel spins are in the repo-wide FL, FR, RL, RR order,
+# so IW[i] lines up with index i of wheel_xy, Fz, kappa, Fx_w and self.tires.
+IX, IY, IPSI, IVX, IVY, IR, IWFL, IWFR, IWRL, IWRR = range(10)
+NSTATES = 10
+NWHEELS = 4
 
 WHEEL_NAMES = ("FL", "FR", "RL", "RR")
+IW = (IWFL, IWFR, IWRL, IWRR)      # state index of each wheel's spin speed
 
 
 def front_steer_angles(p: VehicleParams, delta: float):
@@ -74,6 +93,43 @@ def front_steer_angles(p: VehicleParams, delta: float):
     dFR_m = ad + fA * ((d_out if delta > 0 else d_in) - ad)
     sgn = 1.0 if delta > 0 else -1.0
     return sgn * dFL_m, sgn * dFR_m
+
+
+def wheel_steer_angles(p: VehicleParams, delta: float):
+    """Per-wheel road-wheel angles [rad], order FL FR RL RR. Rears are
+    unsteered; this exists so per-wheel loops never special-case an axle."""
+    dFL, dFR = front_steer_angles(p, delta)
+    return (dFL, dFR, 0.0, 0.0)
+
+
+def contact_speeds(model, s, delta: float):
+    """Each contact patch's speed ALONG ITS OWN WHEEL HEADING [m/s], FL FR RL RR.
+
+    Deliberately a SECOND implementation of the projection that tire_forces()
+    does inline: verify.py compares the two, and a check that re-ran the sim's
+    own expression would prove nothing.
+    """
+    p = model.p
+    vx, vy, r = s[IVX], s[IVY], s[IR]
+    steers = wheel_steer_angles(p, delta)
+    out = []
+    for i, (x, y) in enumerate(model.wheel_xy):
+        vxi = vx - r * y
+        vyi = vy + r * x
+        out.append(vxi * math.cos(steers[i]) + vyi * math.sin(steers[i]))
+    return tuple(out)
+
+
+def free_rolling_omegas(model, s, delta: float):
+    """The four wheel speeds that make kappa exactly zero at this state.
+
+    Use this for every initial condition. `vx0 / r_wheel` is only correct when
+    delta = vy = r = 0 — true of every maneuver TODAY, but not a property
+    anyone should have to remember: at 23 deg of steer it would plant +0.086
+    of slip ratio on each front wheel at t = 0, worth ~800 N of spurious drive
+    force per wheel once the fronts are driven.
+    """
+    return tuple(v / model.p.r_wheel for v in contact_speeds(model, s, delta))
 
 
 class VehicleModel:
@@ -132,14 +188,13 @@ class VehicleModel:
         """Slips and tire forces for all four wheels at state s.
 
         Returns dict with per-wheel lists (order FL FR RL RR):
-            alpha [rad], kappa [-] (0 for fronts), Fx_w/Fy_w (wheel frame),
+            alpha [rad], kappa [-], Fx_w/Fy_w (wheel frame),
             Fx_b/Fy_b (body frame).
         """
         p = self.p
         vx, vy, r = s[IVX], s[IVY], s[IR]
-        omegas = (None, None, s[IWRL], s[IWRR])
-        dFL, dFR = front_steer_angles(p, delta)
-        steers = (dFL, dFR, 0.0, 0.0)
+        omegas = tuple(s[j] for j in IW)
+        steers = wheel_steer_angles(p, delta)
 
         alpha = [0.0] * 4
         kappa = [0.0] * 4
@@ -161,14 +216,13 @@ class VehicleModel:
             # signed so that positive alpha -> positive (leftward) Fy
             alpha[i] = -math.atan2(vcy, max(vcx, p.v_eps))
 
-            if omegas[i] is None:
-                # undriven front wheel: free rolling, lateral force only
-                Fy_w[i] = self.tires[i].lateral(alpha[i], Fz[i])
-                Fx_w[i] = 0.0
-            else:
-                # driven rear wheel: slip ratio from wheel speed state
-                kappa[i] = (omegas[i] * p.r_wheel - vcx) / max(abs(vcx), p.v_eps)
-                Fx_w[i], Fy_w[i] = self.tires[i].combined(kappa[i], alpha[i], Fz[i])
+            # every wheel is driven: slip ratio from its own spin state.
+            # vcx is already resolved along this wheel's heading, so a steered
+            # front wheel needs no special case. At kappa = 0 combined() returns
+            # bit-identically (0, lateral(alpha, Fz)), so a zero-torque wheel
+            # reproduces the old free-roller branch exactly.
+            kappa[i] = (omegas[i] * p.r_wheel - vcx) / max(abs(vcx), p.v_eps)
+            Fx_w[i], Fy_w[i] = self.tires[i].combined(kappa[i], alpha[i], Fz[i])
 
             # back to the body frame
             Fx_b[i] = Fx_w[i] * cd - Fy_w[i] * sd
@@ -178,8 +232,12 @@ class VehicleModel:
                 "Fx_w": Fx_w, "Fy_w": Fy_w, "Fx_b": Fx_b, "Fy_b": Fy_b}
 
     # ------------------------------------------------------------ derivatives
-    def derivatives(self, s, delta: float, T_RL: float, T_RR: float):
+    def derivatives(self, s, delta: float, T_wheel):
         """Time derivatives of the state + an info dict for logging.
+
+        T_wheel is a sequence of FOUR wheel torques [N·m] in FL, FR, RL, RR
+        order. A rear-drive car passes (0, 0, T_RL, T_RR) — the plant has no
+        drive-layout knob and does not need one.
 
         Load transfer depends on accelerations, which depend on tire forces,
         which depend on loads — a small algebraic loop. Solved here with 3
@@ -211,9 +269,12 @@ class VehicleModel:
         ds[IVX] = ax + r * vy
         ds[IVY] = ay - r * vx
         ds[IR] = Mz / p.I_z
-        # rear wheel spin dynamics: drive torque vs. tire reaction torque
-        ds[IWRL] = (T_RL - p.r_wheel * w["Fx_w"][2]) / p.I_wheel_r
-        ds[IWRR] = (T_RR - p.r_wheel * w["Fx_w"][3]) / p.I_wheel_r
+        # wheel spin dynamics at all four corners: drive torque vs. the tire's
+        # reaction. Fx_w is the WHEEL-frame force — the reaction acts about the
+        # spin axis, not the body axis.
+        I_corner = p.I_wheel_corner
+        for i in range(NWHEELS):
+            ds[IW[i]] = (T_wheel[i] - p.r_wheel * w["Fx_w"][i]) / I_corner[i]
 
         info = {"Fz": Fz, "alpha": w["alpha"], "kappa": w["kappa"],
                 "Fx_w": w["Fx_w"], "Fy_w": w["Fy_w"],
