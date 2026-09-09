@@ -891,6 +891,28 @@ def section_h():
         info("H1", f"s-diff at {hz}",
              f"Δω RMSE {dr:.4f} ({(dr / base[1] - 1) * 100:+.0f}%)"
              + ("" if fin else "  ← SPUN"))
+    # The power cap is applied by the CONTROLLER, at the controller's rate, to
+    # the wheel speeds it last saw. Between updates the torque is held while
+    # the wheels accelerate, so delivered power overshoots the commanded cap.
+    # Rules-relevant: EV.4.2 is measured continuously at the accumulator, so a
+    # real VCU needs margin BELOW the cap, not a command exactly at it.
+    from model.maneuvers.tracks import track_maneuvers, model_for
+    trk = track_maneuvers(vp, types=["90deg"])[1]      # the one that reaches it
+    peaks = []
+    for hz, every in (("4 kHz", 1), ("100 Hz", 40)):
+        lg = simulate(model_for(trk, model), make_configs(vp, tp_f, tp_r, cp)[0],
+                      trk, dt=2.5e-4, ctrl_every=every)
+        peaks.append((hz, lg["P_total"].max()))
+    info("H2", "the power cap is enforced at the VCU rate, not continuously",
+         ", ".join(f"{hz} peaks at {p / 1e3:.3f} kW "
+                   f"({100 * (p / vp.P_total_max - 1):+.3f}%)"
+                   for hz, p in peaks)
+         + f" against the {vp.P_total_max / 1e3:.0f} kW cap, on a full-throttle "
+         "apex step. The controller caps the power it COMMANDS, using the wheel "
+         "speeds it last saw; the torque is then held for 10 ms while the wheels "
+         "speed up. EV.4.2 is measured continuously at the accumulator, so a "
+         "real VCU needs margin below the cap, not a command sitting on it.")
+
     degraded = rows[2][1] > 3.0 * base[1] or not rows[2][2]
     check("H1", "gains survive a realistic 100 Hz VCU rate without instability",
           rows[2][2],

@@ -375,3 +375,19 @@ G. FINDINGS FROM THE AWD WORK (2026-09-09)
     maneuver. A third case is new: at Fz = 0 the tire returns (0, 0), so a
     LIFTED driven wheel has dw/dt = T/I with no reaction at all and lands
     with a large slip ratio. verify G9 counts it (0 today, min Fz = 279 N).
+
+#14 The power cap is enforced at the VCU rate, so delivered power overshoots it
+    The controller caps the power it COMMANDS, computed from the wheel speeds
+    it last saw. The torque is then held for a full VCU cycle while the wheels
+    accelerate, so delivered power exceeds the commanded cap. Measured on a
+    full-throttle apex step (verify H2):
+        4 kHz control  peak 80.000 kW   -0.000%
+        100 Hz control peak 80.176 kW   +0.220%
+    EV.4.2 is measured continuously at the accumulator, so a real VCU needs
+    MARGIN BELOW the cap, not a command sitting exactly on it. 0.22% is small,
+    but it is a floor: it grows with cycle time, with wheel acceleration, and
+    it stacks on top of the fact that the sim caps MECHANICAL power while the
+    rules cap electrical power upstream of the losses.
+    Only visible on track runs — corner_exit and the scripted maneuvers never
+    approach the cap, which is why verify section G (which runs only those)
+    passes at its 0.1% tolerance.
