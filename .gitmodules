@@ -1,7 +1,7 @@
 [submodule "sil/SRE-VCU"]
 	path = sil/SRE-VCU
 	url = https://github.com/spartanracingelectric/SRE-VCU.git
-	branch = sdiff-sil
+	branch = S-diff
 	shallow = true
 [submodule "reference/VehicleSim"]
 	path = reference/VehicleSim

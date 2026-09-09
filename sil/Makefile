@@ -19,7 +19,14 @@ BUILD  = build
 BIN    = $(BUILD)/vcu_sil
 
 # -Ihost comes first so host/APDB.h shadows the firmware's (see that file)
+#
+# The two -Wno-error flags: GCC 14 promoted incompatible-pointer-types and
+# int-conversion from warnings to errors, and -w does not downgrade an error.
+# The firmware trips both (e.g. initializations.c passes a ubyte2* where
+# IO_DI_Get wants a bool*). They are the team's to fix in their own build, not
+# ours — same rationale as -w. Drop these once upstream is clean.
 CFLAGS = -std=gnu11 -O0 -g -w -include host/host_types.h \
+         -Wno-error=incompatible-pointer-types -Wno-error=int-conversion \
          -Ihost -I$(VCU)/inc -I$(SRC)
 LDLIBS = -lm
 
@@ -45,7 +52,9 @@ $(SRC)/.patched: $(VCU_SRCS) $(wildcard $(VCU)/dev/*.h) $(PATCHES)
 $(BUILD)/vcu/%.o: $(SRC)/.patched | $(BUILD)/vcu
 	$(CC) $(CFLAGS) -c -o $@ $(SRC)/$*.c
 
-$(BUILD)/host/%.o: host/%.c | $(BUILD)/host
+# io_stubs.c includes the firmware's own sensorCalculations.h for the SAS
+# calibration, so the patched copy has to exist before the host objects build.
+$(BUILD)/host/%.o: host/%.c $(SRC)/.patched | $(BUILD)/host
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 $(BUILD)/vcu $(BUILD)/host:

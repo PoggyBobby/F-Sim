@@ -3,13 +3,23 @@
 
 #include "sil_link.h"
 
-/* rear inverter command frame IDs, extended format, as hardcoded in
+/* Rear inverter command frame IDs, extended format, as hardcoded in
  * canOutput_sendDebugMessage1 (canManager.c); payload is a big-endian
- * sbyte4 in data[0..3] */
+ * sbyte4 in data[0..3].
+ *
+ * On the S-diff branch these are 0x100 = RL, 0x101 = RR. They were the other
+ * way round on sdiff-sil, which is what this file used to say — so every SIL
+ * run was reading the left motor's command as the right one and vice versa,
+ * mirroring the torque split. Re-check these against
+ * canOutput_sendDebugMessage1 whenever the submodule moves. */
+#define CMD_ID_CURRENT_RL  0x100
+#define CMD_ID_CURRENT_RR  0x101
+
+/* Duty-cycle command frames. No path on the S-diff branch emits these
+ * (powertrainControl.c commands milliamps only), so mode 1 never fires there;
+ * kept for the sdiff-sil-era duty path and any future one. */
 #define CMD_ID_DUTY_RL     0x01
 #define CMD_ID_DUTY_RR     0x00
-#define CMD_ID_CURRENT_RL  0x101
-#define CMD_ID_CURRENT_RR  0x100
 
 SilInputs sil_in;
 
