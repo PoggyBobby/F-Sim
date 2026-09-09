@@ -303,7 +303,7 @@ def section_d():
     ctrl = make_configs(vp, tp_f, tp_r, cp)[0]
     log = simulate(model, ctrl, coast, dt=2.5e-4)
     k = 0.5 * RHO_AIR * vp.CdA
-    m_eff = vp.m_total + 2 * vp.I_wheel / vp.r_wheel ** 2
+    m_eff = vp.m_total + 2 * vp.I_wheel_r / vp.r_wheel ** 2
     v_pred = 15.0 / (1 + k * 15.0 * 3.0 / m_eff)
     v_sim = log["vx"][-1]
     check("D1", "coast-down matches closed-form drag solution (with wheel KE)",

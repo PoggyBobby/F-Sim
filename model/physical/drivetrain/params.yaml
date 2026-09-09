@@ -138,24 +138,48 @@ motor_max_speed:
     envelope, not the limiter. NOT enforced by this basic sim; recorded for
     completeness and future top-speed studies.
 
-I_wheel:
-  label:  "Wheel spin inertia"
+I_wheel_rear:
+  label:  "Wheel spin inertia, rear corner"
   value:  0.35
   unit:   kg*m^2
-  symbol: I_w
+  symbol: I_w,r
   status: DERIVED estimate — replace with CAD
   what: >
-    Spin inertia of ONE rear corner about the axle: tire + rim + brake rotor +
+    Spin inertia of ONE REAR corner about the axle: tire + rim + brake rotor +
     hub + (motor rotor inertia * gear_ratio^2).
-  need:   Rotating inertia of one corner
+  need:   Rotating inertia of one rear corner
   how:    CAD mass properties + rotor J from the exact AMK motor sheet
   why: >
     Sets how fast an unloaded wheel spins up — the s-diff's whole problem.
-    Controller gains are sensitive to it: retune when it changes.
+    Controller gains are sensitive to it: retune when it changes. Together with
+    I_wheel_front it also sets the effective mass the car must accelerate,
+    which verify.py D1 measures against a closed-form coast-down.
   note: >
     Estimate = tire+rim+hub ~0.30 (guess for an 18in tire on a 10in rim) +
     rotor inertia * gear^2 ~ 2.74e-4 * 13^2 ~ 0.05. The old report's
-    I_w = 3.033 was rejected: ~10x too large for one corner.
+    I_w = 3.033 was rejected: ~10x too large for one corner. Renamed from
+    `I_wheel` on 2026-09-08 when the sim gained front wheel-spin states; the
+    VALUE is unchanged.
+
+I_wheel_front:
+  label:  "Wheel spin inertia, front corner"
+  derived: drivetrain.I_wheel_rear
+  unit:   kg*m^2
+  symbol: I_w,f
+  status: DERIVED — front corner ASSUMED identical to rear; replace when CAD says otherwise
+  what: >
+    Spin inertia of ONE FRONT corner about the axle. Same construction as the
+    rear — same tire, same rim, same in-upright motor and planetary, same brake
+    rotor — so the same number, written as a formula so the ASSUMPTION is
+    visible in the data rather than buried in code.
+  need:   Rotating inertia of one front corner (CAD)
+  how:    CAD mass properties on the front upright assembly
+  why: >
+    The front rotor spins whether or not that motor is energised, so this
+    number is real for the 2-rear build too. It is the term the sim dropped
+    when it called the fronts "massless free-rollers": worth
+    2*I/r_w^2 = 13.4 kg of apparent mass, 5.3% of the car, and 0.6% on a 3 s
+    coast-down.
 
 power_cap_total:
   label:  "Total power cap"

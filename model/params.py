@@ -53,7 +53,8 @@ class VehicleParams:
     I_z: float = cfg.geometry.I_z
     # wheels / drivetrain
     r_wheel: float = cfg.drivetrain.wheel_radius
-    I_wheel: float = cfg.drivetrain.I_wheel
+    I_wheel_f: float = cfg.drivetrain.I_wheel_front
+    I_wheel_r: float = cfg.drivetrain.I_wheel_rear
     gear_ratio: float = cfg.drivetrain.gear_ratio
     motor_T_peak: float = cfg.drivetrain.motor_torque_peak
     motor_kt: float = cfg.drivetrain.motor_kt
@@ -71,6 +72,7 @@ class VehicleParams:
     lat_transfer_frac_front: float = cfg.loads.lat_transfer_frac_front
     # numerical guard
     v_eps: float = cfg.numerical.v_eps
+    w_eps: float = cfg.numerical.w_eps
 
     # ---- derived quantities (computed, never entered) ----------------------
     @property
@@ -95,6 +97,11 @@ class VehicleParams:
     def T_wheel_max(self) -> float:
         """Peak torque available at ONE wheel (motor peak * gear ratio)."""
         return self.motor_T_peak * self.gear_ratio
+
+    @property
+    def I_wheel_corner(self) -> tuple:
+        """Spin inertia per corner, wheel order FL, FR, RL, RR."""
+        return (self.I_wheel_f, self.I_wheel_f, self.I_wheel_r, self.I_wheel_r)
 
     @property
     def T_drive_max(self) -> float:

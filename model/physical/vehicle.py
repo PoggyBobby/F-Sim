@@ -212,8 +212,8 @@ class VehicleModel:
         ds[IVY] = ay - r * vx
         ds[IR] = Mz / p.I_z
         # rear wheel spin dynamics: drive torque vs. tire reaction torque
-        ds[IWRL] = (T_RL - p.r_wheel * w["Fx_w"][2]) / p.I_wheel
-        ds[IWRR] = (T_RR - p.r_wheel * w["Fx_w"][3]) / p.I_wheel
+        ds[IWRL] = (T_RL - p.r_wheel * w["Fx_w"][2]) / p.I_wheel_r
+        ds[IWRR] = (T_RR - p.r_wheel * w["Fx_w"][3]) / p.I_wheel_r
 
         info = {"Fz": Fz, "alpha": w["alpha"], "kappa": w["kappa"],
                 "Fx_w": w["Fx_w"], "Fy_w": w["Fy_w"],

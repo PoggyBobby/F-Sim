@@ -22,7 +22,8 @@ Generated from the `params.yaml` files — regenerate with `.venv/bin/python par
 | `controllers.k_inner` | `controllers/python/params.yaml` | CURRENT CAR |
 | `controllers.rate` | `controllers/python/params.yaml` | CURRENT CAR |
 | `controllers.steering_ratio` | `controllers/python/params.yaml` | CURRENT CAR |
-| `drivetrain.I_wheel` | `model/physical/drivetrain/params.yaml` | DERIVED |
+| `drivetrain.I_wheel_front` | `model/physical/drivetrain/params.yaml` | DERIVED |
+| `drivetrain.I_wheel_rear` | `model/physical/drivetrain/params.yaml` | DERIVED |
 | `drivetrain.driven_wheels` | `model/physical/drivetrain/params.yaml` | CURRENT CAR |
 | `drivetrain.gear_ratio` | `model/physical/drivetrain/params.yaml` | FROM REPORT |
 | `drivetrain.motor_kt` | `model/physical/drivetrain/params.yaml` | PLACEHOLDER |
@@ -49,6 +50,7 @@ Generated from the `params.yaml` files — regenerate with `.venv/bin/python par
 | `mass.driver` | `model/physical/mass/params.yaml` | CURRENT CAR |
 | `mass.total` | `model/physical/mass/params.yaml` | DERIVED |
 | `numerical.v_eps` | `model/physical/numerical/params.yaml` | NUMERICAL GUARD |
+| `numerical.w_eps` | `model/physical/numerical/params.yaml` | NUMERICAL GUARD |
 | `sensors.brake_pressure_sens.actuated_bar` | `model/sensors/brake_pressure_sens/params.yaml` | PLACEHOLDER |
 | `sensors.brake_pressure_sens.quant_bar` | `model/sensors/brake_pressure_sens/params.yaml` | PLACEHOLDER |
 | `sensors.brake_pressure_sens.range_bar` | `model/sensors/brake_pressure_sens/params.yaml` | PLACEHOLDER |
