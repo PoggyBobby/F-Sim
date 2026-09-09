@@ -404,8 +404,6 @@ def main():
         # every other maneuver gets the base model back unchanged
         results = run_matrix(model_for(man, model), controllers, man, dt=dt,
                              sensors=sensors, ctrl_every=ctrl_every)
-        results = run_matrix(model, controllers, man, dt=dt, sensors=sensors,
-                             ctrl_every=ctrl_every)
         print_table(man, results)
         if args.sil:
             print("    " + controllers[-1].summary())

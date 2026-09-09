@@ -44,15 +44,20 @@ def simulate(model: VehicleModel, controller, maneuver, dt=2.5e-4, log_every=4,
     from model.config import cfg
     p = model.p
     controller.reset()
+
+    # closed-loop "driver replacement" (tracks.py): inputs from (t, state);
+    # scripted maneuvers keep their open-loop inputs(t). run_matrix reuses ONE
+    # maneuver object across every config, and TrackDriver carries PI state, so
+    # reset it here rather than relying on its t < t_last auto-reset.
+    driver = getattr(maneuver, "driver", None)
+    if driver is not None and hasattr(driver, "reset"):
+        driver.reset()
+
     adapter = None
     if sensors is not None:
         from model.sensors import DriverAdapter
         sensors.reset()
         adapter = DriverAdapter(p)
-
-    # closed-loop "driver replacement" (tracks.py): inputs from (t, state);
-    # scripted maneuvers keep their open-loop inputs(t)
-    driver = getattr(maneuver, "driver", None)
 
     n_steps = int(round(maneuver.duration / dt))
     s = [0.0] * NSTATES
@@ -74,7 +79,6 @@ def simulate(model: VehicleModel, controller, maneuver, dt=2.5e-4, log_every=4,
         t = k * dt
         delta, T_req = (driver(t, s) if driver is not None
                         else maneuver.inputs(t))
-        delta, T_req = maneuver.inputs(t)
         if k % ctrl_every == 0 or dbg is None:
             if sensors is None:
                 dbg = controller.update(s, delta, T_req, dt * ctrl_every)
