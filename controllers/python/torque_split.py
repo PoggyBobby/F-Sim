@@ -19,12 +19,17 @@ per-wheel request T_base = T_req_total / 2.
         inner side = left if delta > deadband, right if delta < -deadband,
                      neither inside the deadband (f still applies)
         f, g_left, g_right are slew-limited at `rate` per second, then
-        T_RL = T_base * f * g_left,  T_RR = T_base * f * g_right,
-        each clamped to ±torque_clamp_Nm.
+        T_RL = T_base * clamp(f * g_left,  0, 1),
+        T_RR = T_base * clamp(f * g_right, 0, 1).
    Same variable names as the C so the two can be diffed by eye. Two
    deliberate differences: no handwheel→road-wheel conversion (our delta is
    already a road-wheel angle in rad), and slew() takes dt instead of
    assuming the VCU's 10 ms loop. Constants: controllers/python/params.yaml.
+
+   ANGLE UNITS: sdiff.c works in road-wheel DEGREES. The YAML carries the
+   same numbers as the C #defines under `unit: deg`, so the loader hands this
+   code radians and delta/delta_max matches the C's delta_deg/DELTA_MAX
+   exactly. Do not reintroduce a degrees conversion here.
 
 Torque vectoring is parked in torque_vectoring.py (not imported).
 
@@ -120,8 +125,10 @@ class TorqueSplitController:
             self.g_left_appl = slew(self.g_left_appl, g_left, cp.rate, dt)
             self.g_right_appl = slew(self.g_right_appl, g_right, cp.rate, dt)
             dbg.f_applied, dbg.g_left_appl, dbg.g_right_appl = self.f_applied, self.g_left_appl, self.g_right_appl
-            T_RL = clampf(T_base * self.f_applied * self.g_left_appl,  -cp.torque_clamp_Nm, cp.torque_clamp_Nm)
-            T_RR = clampf(T_base * self.f_applied * self.g_right_appl, -cp.torque_clamp_Nm, cp.torque_clamp_Nm)
+            mult_left  = clampf(self.f_applied * self.g_left_appl,  0.0, 1.0)
+            mult_right = clampf(self.f_applied * self.g_right_appl, 0.0, 1.0)
+            T_RL = T_base * mult_left
+            T_RR = T_base * mult_right
         else:
             T_RL = T_RR = T_base
 

@@ -487,18 +487,23 @@ def section_f():
     ctrl.reset()
     for _ in range(200):
         d = ctrl.update(s, 0.5 * cp.deadband, 200.0, 0.01)
+    # (with k_derate = 0 the budget term is inert and f_db is exactly 1.0 —
+    # what F10 still proves is that the two sides stay equal.)
     f_db = max(1.0 - cp.k_derate * (0.5 * cp.deadband / cp.delta_max), cp.f_min)
     check("F10", "s-diff inside deadband: equal sides, budget-only derate",
           abs(d.T_RL - d.T_RR) < 1e-12 and abs(d.T_RL - 100.0 * f_db) < 1e-9,
           f"RL {d.T_RL:.2f} / RR {d.T_RR:.2f} (f = {f_db:.4f}, no L/R split)")
 
     # F11: slew actually limits — one 10 ms step from straight toward full
-    # lock may move f by at most rate*dt.
+    # lock may move a multiplier by at most rate*dt. Probed on g_left, the
+    # INNER multiplier: with k_derate = 0 (the current sdiff.c) f's target is
+    # 1.0, so f never leaves its 1.0 start and cannot exercise the slew.
     ctrl.reset()
     d = ctrl.update(s, +cp.delta_max, 200.0, 0.01)
-    check("F11", "s-diff slew: one step moves f by <= rate*dt",
-          abs(d.f_applied - (1.0 - cp.rate * 0.01)) < 1e-9,
-          f"f after one step {d.f_applied:.4f} (limit {1.0 - cp.rate * 0.01:.4f})")
+    check("F11", "s-diff slew: one step moves g_left by <= rate*dt",
+          abs(d.g_left_appl - (1.0 - cp.rate * 0.01)) < 1e-9,
+          f"g_left after one step {d.g_left_appl:.4f} "
+          f"(limit {1.0 - cp.rate * 0.01:.4f})")
 
 
 # ═══════════════════════ G. in-run invariant audit (standard maneuvers)

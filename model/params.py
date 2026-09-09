@@ -118,15 +118,17 @@ class TireParams:
 # ─────────────────────────────────────────────────────────────────────────
 @dataclass
 class ControlParams:
-    # open-loop s-diff (sdiff.c) — see controllers/python/params.yaml
-    steering_ratio: float = cfg.controllers.steering_ratio
+    # open-loop s-diff (sdiff.c) — see controllers/python/params.yaml.
+    # delta_max and deadband are road-wheel ANGLES: entered in the YAML as the
+    # same degrees the C #defines use, held here in radians like every other
+    # angle in the sim.
+    steering_ratio: float = cfg.controllers.steering_ratio   # mirrors the C; unused here
     delta_max: float = cfg.controllers.delta_max
     k_derate: float = cfg.controllers.k_derate
     k_inner: float = cfg.controllers.k_inner
     f_min: float = cfg.controllers.f_min
     deadband: float = cfg.controllers.deadband
     rate: float = cfg.controllers.rate
-    torque_clamp_Nm: float = cfg.controllers.torque_clamp_Nm
 
 
 def default_setup():
