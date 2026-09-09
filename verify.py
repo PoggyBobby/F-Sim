@@ -37,6 +37,7 @@ from model.params import VehicleParams, TireParams, ControlParams, default_setup
 from model.physical.tires.tire import MagicFormulaTire
 from model.physical.vehicle import (VehicleModel, front_steer_angles, NSTATES, NWHEELS,
                                     IW, WHEEL_NAMES, free_rolling_omegas,
+                                    wheel_steer_angles,
                                     contact_speeds, IX, IY, IPSI,
                      IVX, IVY, IR, IWRL, IWRR)
 from controllers.python.torque_split import TorqueSplitController, make_configs
@@ -141,6 +142,24 @@ def section_a():
           and tire.combined(0.3, 0.2, -50.0) == (0.0, 0.0))
     check("A5", "zero slip / zero load → zero force (incl. negative load)", ok)
 
+    # A6: combined(0, α, Fz) is BIT-IDENTICAL to (0, lateral(α, Fz)). This is
+    # the identity the whole four-wheel change rests on — it is why a
+    # zero-torque wheel reproduces the old free-roller branch exactly, and why
+    # the plant needs no `if undriven` branch. Asserted with ==, not a
+    # tolerance: _mf(0) = 0 kills Fx, and pure lateral force can never exceed
+    # the ellipse because D = µ·Fz is the curve's own peak, so the cap never
+    # fires.
+    worst_fx = worst_fy = 0.0
+    for Fz_ in (0.0, -50.0, 200.0, 537.0, 900.0, 1600.0):
+        for adeg in np.linspace(-20.0, 20.0, 121):
+            fx, fy = tire.combined(0.0, math.radians(adeg), Fz_)
+            worst_fx = max(worst_fx, abs(fx))
+            worst_fy = max(worst_fy, abs(fy - tire.lateral(math.radians(adeg), Fz_)))
+    check("A6", "combined(0, α, Fz) ≡ (0, lateral(α, Fz)) exactly",
+          worst_fx == 0.0 and worst_fy == 0.0,
+          f"over 6 loads × 121 slip angles: max |Fx| = {worst_fx}, "
+          f"max |Fy − lateral| = {worst_fy} (exact zeros, not tolerances)")
+
 
 # ═══════════════════════════════════════════════ B. vertical loads
 def section_b():
@@ -188,6 +207,39 @@ def section_b():
     want = 2 * vp.m_total * 8.0 * vp.h_cg / vp.track_f
     check("B3", "total lateral transfer = m·ay·h/track",
           abs(dF_tot / want - 1) < 1e-12, f"{dF_tot:.1f} vs {want:.1f} N")
+
+    # B5: axle-load statics under longitudinal acceleration, against the
+    # textbook moment balance derived here independently. This is the term the
+    # four-corner allocator has to estimate, so it is worth pinning exactly.
+    worst = 0.0
+    for ax in (0.0, 4.0, 8.0, 11.0):
+        Fz_ = VehicleModel(VehicleParams(ClA=0.0), MagicFormulaTire(tp_f),
+                           MagicFormulaTire(tp_r)).wheel_loads(0.0, ax, 0.0)
+        got = (Fz_[0] + Fz_[1]) / (Fz_[2] + Fz_[3])
+        want = ((G * vp.b - ax * vp.h_cg) / (G * vp.a + ax * vp.h_cg))
+        worst = max(worst, abs(got / want - 1))
+    check("B5", "front/rear axle load ratio matches the moment balance under ax",
+          worst < 1e-12, f"worst relative error {worst:.1e} over ax = 0…11 m/s²")
+
+    # B6: the coupling AWD introduces. Longitudinal transfer unloads the front,
+    # so per-wheel LONGITUDINAL capacity µx(Fz)·Fz diverges between the axles —
+    # the front tire saturates at a torque the rear cannot even reach.
+    ratios = []
+    for ax in (0.0, 4.0, 8.0, 11.0):
+        Fz_ = model.wheel_loads(10.0, ax, 0.0)
+        cap_f = model.tires[0].mu_x(Fz_[0]) * Fz_[0]
+        cap_r = model.tires[2].mu_x(Fz_[2]) * Fz_[2]
+        ratios.append(cap_r / cap_f)
+    rising = all(b > a for a, b in zip(ratios, ratios[1:]))
+    check("B6", "rear/front longitudinal capacity grows with acceleration",
+          ratios[0] > 1.0 and rising,
+          "ratio " + " → ".join(f"{r:.3f}" for r in ratios) + " at ax = 0/4/8/11 m/s²")
+    Fz8 = model.wheel_loads(10.0, 8.0, 0.0)
+    info("B6", "per-wheel saturating torque at 0.8 g",
+         f"front {model.tires[0].mu_x(Fz8[0]) * Fz8[0] * vp.r_wheel:.1f} N·m vs rear "
+         f"{model.tires[2].mu_x(Fz8[2]) * Fz8[2] * vp.r_wheel:.1f} N·m, against "
+         f"{vp.T_wheel_max:.0f} N·m per motor — a front motor can overwhelm its "
+         "own tire at 60% of its peak while the rears cannot saturate at all")
 
     # B4: wheel lift — clamp engages, no negative load ever escapes.
     Fzx = model.wheel_loads(0.0, 0.0, 60.0)     # absurd ay to force lift
@@ -312,6 +364,56 @@ def section_c():
           f"front |Fx_w| = {worst_fx:.1e} N, |Fy_w − lateral()| = {worst_fy:.1e} N "
           "— combined(0, α, Fz) is bit-identically (0, lateral(α, Fz))")
 
+    # C6: the yaw moment a FRONT left/right torque split makes. Until the
+    # fronts were driven, front Fx_w was identically 0, so half of the
+    # body-frame rotation at the bottom of tire_forces() was dead code.
+    #
+    # At delta = 0, with Fx on the fronts only:
+    #     Mz = Σ(x·Fy_b − y·Fx_b) = −y_FL·Fx_FL − y_FR·Fx_FR
+    #        = −(t_f/2)·Fx_FL + (t_f/2)·Fx_FR = +(t_f/2)·ΔFx
+    # with ΔFx = Fx_FR − Fx_FL. Note the HALF: the couple arm is the
+    # half-track, not the track.
+    dFx = 600.0
+    fx = [-dFx / 2.0, +dFx / 2.0, 0.0, 0.0]
+    Mz_front = sum(x * 0.0 - y * f for (x, y), f in zip(model.wheel_xy, fx))
+    check("C6", "front L/R force split: Mz = +(track_f/2)·ΔFx",
+          abs(Mz_front - 0.5 * vp.track_f * dFx) < 1e-9,
+          f"Mz {Mz_front:+.3f} vs hand-derived {0.5 * vp.track_f * dFx:+.3f} N·m "
+          f"for ΔFx = {dFx:.0f} N (positive ΔFx → nose LEFT)")
+
+    # C6b: a DRIVEN AND STEERED front wheel. Its drive force rotates into BOTH
+    # body axes, so it adds an x·Fy yaw term the rear axle has no equivalent
+    # of. Check the rotation per wheel straight out of the plant.
+    s6 = list(s)
+    for j, w0 in zip(IW, free_rolling_omegas(model, s, delta)):
+        s6[j] = w0
+    s6[IW[0]] *= 1.05                      # spin FL up: real front Fx at last
+    w6 = model.tire_forces(s6, delta, Fz)
+    st6 = wheel_steer_angles(vp, delta)
+    worst_rot = 0.0
+    for i in range(NWHEELS):
+        cd, sd = math.cos(st6[i]), math.sin(st6[i])
+        worst_rot = max(worst_rot,
+                        abs(w6["Fx_b"][i] - (w6["Fx_w"][i] * cd - w6["Fy_w"][i] * sd)),
+                        abs(w6["Fy_b"][i] - (w6["Fx_w"][i] * sd + w6["Fy_w"][i] * cd)))
+    check("C6b", "driven+steered front: body-frame rotation exact per wheel",
+          worst_rot < 1e-12 and abs(w6["Fx_w"][0]) > 1.0,
+          f"worst rotation error {worst_rot:.1e} N with front Fx_w = "
+          f"{w6['Fx_w'][0]:.1f} N at δ = {math.degrees(delta):.1f}°")
+    info("C6b", "the steer-projection yaw arm the rear axle does not have",
+         "a·sin δ vs (t_f/2)·cos δ = " + ", ".join(
+             f"{math.degrees(d):.0f}°: {100 * vp.a * math.sin(d) / (0.5 * vp.track_f * math.cos(d)):.0f}%"
+             for d in (math.radians(5), math.radians(8), math.radians(23))))
+
+    # C7: at delta = 0 the two axles buy identical yaw per newton — but only
+    # because track_f == track_r on this car. The allocator needs to know that.
+    fx_r = [0.0, 0.0, -dFx / 2.0, +dFx / 2.0]
+    Mz_rear = sum(x * 0.0 - y * f for (x, y), f in zip(model.wheel_xy, fx_r))
+    check("C7", "front and rear L/R splits give the same Mz at δ = 0",
+          abs(Mz_front - Mz_rear) < 1e-12,
+          f"{Mz_front:+.3f} vs {Mz_rear:+.3f} N·m — equal ONLY because "
+          f"track_f = track_r = {vp.track_f:.2f} m today")
+
     # C4: yaw moment sum — synthetic forces with a hand-computed answer.
     Mz_hand = 0.0
     forces = [(120.0, 800.0), (-40.0, 900.0), (300.0, 400.0), (250.0, 350.0)]
@@ -356,6 +458,17 @@ def section_d():
     info("D1", "wheel-inertia effect on coast",
          f"{abs(m_nowheel - v_pred) * 1000:.0f} mm/s over 3 s — I_WHEEL is "
          "visible but small here; it matters most in spin-up, not coasting")
+
+    # D5: the pointwise mechanism whose integral D1 checks. Coasting with zero
+    # torque, the front wheels are DECELERATING the car's forward motion into
+    # their own rotation, so they must sit at a small POSITIVE slip ratio and
+    # push the car along — the free-roller model made this force identically 0.
+    kf = np.concatenate([log["kFL"], log["kFR"]])
+    check("D5", "coasting fronts carry a small positive slip ratio (their KE)",
+          kf.min() >= 0.0 and kf.max() < 5e-3,
+          f"front κ over the coast: {kf.min():.2e} … {kf.max():.2e} — the "
+          f"{2 * vp.I_wheel_f / vp.r_wheel ** 2:.1f} kg of front rotational "
+          "inertia the old massless free-roller ignored")
 
     # D2: mirror symmetry. Same maneuver with steer sign flipped must give
     # the exactly mirrored trajectory — catches ANY left/right sign error.
