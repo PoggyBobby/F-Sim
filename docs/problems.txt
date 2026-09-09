@@ -232,6 +232,64 @@ E. TWO THINGS TO KNOW BEFORE TOUCHING ANY OF IT
      (.venv/bin/python verify.py, exit 0) before landing anything above.
 
 
+F. FIRMWARE FINDINGS (SRE-VCU submodule — NOT ours to fix)
+==========================================================
+Found 2026-09-08 while aligning the Python s-diff with the C. Both are on
+the S-diff branch at 5df1baf ("sdiff run 3") — the tip the gitlink pins,
+the SIL builds, and the car was driven with at PNR runs #1-#3. Report
+upstream; do not patch the submodule.
+
+BUG 4  No safety condition reduces torque
+    File: dev/safety.c, end of SafetyChecker_reduceTorque()
+    The function computes `multiplier` correctly through every branch —
+    including multiplier = 0 for "any VCU fault exists", for HVIL
+    termination sense lost, and for the EV.4.7 APPS/BPS implausibility —
+    and then throws it away. The four lines that apply it:
+
+        // powertrain->motor_fl = (sbyte4)(powertrain->motor_fl * multiplier);
+        // powertrain->motor_fr = (sbyte4)(powertrain->motor_fr * multiplier);
+        // powertrain->motor_rl = (sbyte4)(powertrain->motor_rl * multiplier);
+        // powertrain->motor_rr = (sbyte4)(powertrain->motor_rr * multiplier);
+
+    are commented out. Disabled by commit 4c164a7 (2026-09-05, "commenting
+    out cutting off motors") and still commented at the tip.
+
+    Confirmed in the SIL, with patches/0004 applied so the brake reads at
+    all: at 50% APPS and 40 bar of brake the firmware sets percent = 0.400,
+    brakesAreOn = 1, and raises F_tpsbpsImplausible (faults = 0x400) — and
+    both rear motors stay at full 35000 mA for the whole event.
+
+    This is rules-critical: EV.4.7 / EV.5.7 require power to the motors to
+    be shut down completely when the brakes are actuated and APPS reads
+    over 25%, demonstrated at Technical Inspection. As written, nothing
+    shuts torque down for any reason.
+
+BUG 5  DELTA_MAX looks like a typo
+    File: dev/sdiff.c
+    DELTA_MAX went 25 -> 2 in commit ba13d61, whose message is "refactor
+    comments and formatting in sdiff.h for clarity" — a formatting commit
+    that moved a value by 12.5x. 25 is about the 23.2 deg full-lock road
+    wheel angle, which would make the derate ramp progressively across the
+    whole steering range. 2 makes delta_norm saturate at 2 deg of road
+    wheel (about 10.8 deg of handwheel at 5.4:1), so the inner-wheel cut is
+    effectively on/off rather than progressive.
+
+    It survived PNR runs #1-#3 with K_INNER tuned on top of it, so it may
+    now be load-bearing — changing it back to 25 would change the feel of
+    every corner and would need a retune. Ask before touching it.
+    controllers/python/params.yaml mirrors the current value (2.0) and tags
+    it SUSPECT rather than CURRENT CAR so it shows up in the team sheet.
+
+    Note this is NOT the units bug. That one (the sim consuming DELTA_MAX
+    and DEADBAND as radians while the C used degrees, which put the
+    deadband past full lock and reduced the s-diff to a flat ~5% cut) was
+    fixed on 2026-09-08. Its cause: on 2026-09-05, b6166ee copied S-diff's
+    degree-domain values into controllers/python/params.yaml without
+    touching `unit: rad`, mirroring submodule commit 5750309 which did the
+    same to the sdiff-sil header. S-diff had already fixed its own side in
+    cc6d859.
+
+
 SUGGESTED ORDER
 ===============
   1. Baseline: run verify.py, confirm 78/78 on this branch.

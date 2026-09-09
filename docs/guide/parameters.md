@@ -15,14 +15,13 @@ Generated from the `params.yaml` files — regenerate with `.venv/bin/python par
 | `aero.cd_coeff` | `model/physical/aero/params.yaml` | FROM REPORT |
 | `aero.cl_coeff` | `model/physical/aero/params.yaml` | FROM REPORT |
 | `aero.frontal_area` | `model/physical/aero/params.yaml` | FROM REPORT |
-| `controllers.deadband` | `controllers/python/params.yaml` | PLACEHOLDER |
-| `controllers.delta_max` | `controllers/python/params.yaml` | CURRENT CAR |
-| `controllers.f_min` | `controllers/python/params.yaml` | PLACEHOLDER |
-| `controllers.k_derate` | `controllers/python/params.yaml` | PLACEHOLDER |
-| `controllers.k_inner` | `controllers/python/params.yaml` | PLACEHOLDER |
-| `controllers.rate` | `controllers/python/params.yaml` | PLACEHOLDER |
+| `controllers.deadband` | `controllers/python/params.yaml` | CURRENT CAR |
+| `controllers.delta_max` | `controllers/python/params.yaml` | SUSPECT |
+| `controllers.f_min` | `controllers/python/params.yaml` | CURRENT CAR |
+| `controllers.k_derate` | `controllers/python/params.yaml` | CURRENT CAR |
+| `controllers.k_inner` | `controllers/python/params.yaml` | CURRENT CAR |
+| `controllers.rate` | `controllers/python/params.yaml` | CURRENT CAR |
 | `controllers.steering_ratio` | `controllers/python/params.yaml` | CURRENT CAR |
-| `controllers.torque_clamp_Nm` | `controllers/python/params.yaml` | PLACEHOLDER |
 | `drivetrain.I_wheel` | `model/physical/drivetrain/params.yaml` | DERIVED |
 | `drivetrain.gear_ratio` | `model/physical/drivetrain/params.yaml` | FROM REPORT |
 | `drivetrain.motor_kt` | `model/physical/drivetrain/params.yaml` | PLACEHOLDER |

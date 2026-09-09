@@ -112,7 +112,9 @@ Both paths end in `_apply_limits()`: per-wheel peak torque (where the **base** t
 
 ### What the s-diff currently is
 
-The live s-diff is a **line-for-line Python port of `sdiff.c`** from the SRE-VCU `sdiff-sil` branch — deliberately open-loop on steering angle only, never reading wheel speeds. Same variable names as the C so the two can be diffed by eye. Torque vectoring was removed on 2026-09-04 and parked in `controllers/python/torque_vectoring.py`, which **nothing imports**; that file carries its own re-enable instructions. `make_configs()` returns two configs: `open (50/50)` and `s-diff`.
+The live s-diff is a **line-for-line Python port of `sdiff.c`** from the SRE-VCU **`S-diff`** branch (the one the gitlink pins and the SIL builds; `sdiff-sil` is a stale fork — see below) — deliberately open-loop on steering angle only, never reading wheel speeds. Same variable names as the C so the two can be diffed by eye.
+
+**`sdiff.c` works in road-wheel DEGREES.** `controllers/python/params.yaml` carries the same numbers as the C `#define`s under `unit: deg`, so the loader hands the controller radians and `delta / delta_max` matches the C's `delta_deg / DELTA_MAX` exactly. Don't "fix" this by adding a degrees conversion in `torque_split.py`. The constants mirror the firmware — when the C changes, they change; they are not a design output of this sim. Torque vectoring was removed on 2026-09-04 and parked in `controllers/python/torque_vectoring.py`, which **nothing imports**; that file carries its own re-enable instructions. `make_configs()` returns two configs: `open (50/50)` and `s-diff`.
 
 ### SIL — the real firmware in the loop
 
@@ -130,7 +132,12 @@ The live s-diff is a **line-for-line Python port of `sdiff.c`** from the SRE-VCU
 2. `run_sim.py:412` overwrites the `model_for(man, model)` call at line 405, discarding the split-µ plant. The split-µ test runs on a uniform-µ car, at double the compute.
 3. `runlog.py:625-627` reads pre-restructure parameter keys (`CAR_MASS_NO_DRIVER`, `TIRE_MU0`) instead of dotted config paths, so `total_mass_kg` is `nan` and `tire_mu0` is empty in every `runs/index.csv` row.
 
-Also: `DELTA_MAX` (2) and `DEADBAND` (1.0) are consumed as **radians** in both `sdiff.h` and `controllers/python/params.yaml`, but full road-wheel lock is 0.405 rad. The inner/outer split therefore never engages at any steering angle, and the s-diff reduces to a flat ~5% torque cut.
+The rad/deg divergence in `controllers/python/params.yaml` (which made the inner/outer split unreachable and reduced the s-diff to a flat ~5% cut) was **fixed on 2026-09-08**; so were the three stale `sdiff-sil` assumptions in the SIL host layer (SAS calibration, RL/RR CAN IDs, uncalibrated brake).
+
+Two live findings came out of that work, both **in the firmware, neither fixed**:
+
+1. **No safety condition reduces torque on `S-diff`.** `SafetyChecker_reduceTorque()` computes `multiplier` correctly — including `multiplier = 0` for any fault, HVIL loss, or the EV.4.7 APPS/BPS implausibility — and then discards it: the four `powertrain->motor_* = ... * multiplier` lines at the end of the function are commented out (upstream `4c164a7`, "commenting out cutting off motors", still commented at `5df1baf`). Confirmed in the SIL: at 50% APPS with the brakes at 40 bar the fault flag `F_tpsbpsImplausible` sets and both rear motors stay at full 35000 mA. This is rules-critical (EV.4.7 / EV.5.7).
+2. **`DELTA_MAX` is probably a typo.** It went `25 → 2` in `ba13d61`, a commit whose message is "refactor comments and formatting in sdiff.h for clarity". `25` ≈ the 23.2° full-lock angle and would make the derate progressive; `2` saturates it at ~10.8° of handwheel, so the s-diff is close to on/off. It survived PNR runs #1–#3. `params.yaml` mirrors the current value and tags it `SUSPECT`.
 
 ## Documentation drift
 
