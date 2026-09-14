@@ -20,14 +20,18 @@ class SensorReadings:
     """What the VCU receives — quantized, noisy, filtered."""
     apps_pct: float = 0.0
     bps_bar: float = 0.0
-    motor_rpm_RL: float = 0.0        # WSS: motor-side speeds
+    motor_rpm_FL: float = 0.0        # WSS: motor-side speeds, FL FR RL RR
+    motor_rpm_FR: float = 0.0
+    motor_rpm_RL: float = 0.0
     motor_rpm_RR: float = 0.0
     yaw_rate: float = 0.0            # IMU gyro after VCU low-pass [rad/s]
     ax: float = 0.0                  # IMU accelerometers [m/s²]
     ay: float = 0.0
     handwheel_deg: float = 0.0       # SAS
     # ---- VCU-derived (computed from the raw readings above) ----
-    wheel_speed_RL: float = 0.0      # rad/s at the wheel (÷ gear ratio)
+    wheel_speed_FL: float = 0.0      # rad/s at the wheel (÷ gear ratio)
+    wheel_speed_FR: float = 0.0
+    wheel_speed_RL: float = 0.0
     wheel_speed_RR: float = 0.0
     vx_est: float = 0.0              # estimated ground speed [m/s]
     steer_est: float = 0.0           # estimated road-wheel angle [rad]

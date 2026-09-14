@@ -23,18 +23,19 @@ Conventions (ISO 8855):
     Wheel order everywhere in the code: [FL, FR, RL, RR].
     Left-side wheels sit at y = +track/2, right-side at y = -track/2.
 
-Drive layout (team-confirmed 2026-08-30): four motors fitted, one per wheel;
-the two REAR ones are active in the current build, 4WD is the goal. The same
-controller math applies per axle — extension noted in README.md.
+Drive layout (team-confirmed 2026-08-30): four motors fitted, one per wheel.
+The sim drives all four as of 2026-09-09 — the plant takes four wheel torques
+and a rear-drive car is simply zero on the fronts. `driven_wheels` sets what
+100% throttle MEANS (n * T_wheel_max); it is not used by the plant.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from model.config import cfg
 from model.config import G, RHO_AIR   # re-exported; the sim imports these here
 
-__all__ = ["VehicleParams", "TireParams", "ControlParams", "default_setup",
-           "G", "RHO_AIR"]
+__all__ = ["VehicleParams", "TireParams", "ControlParams", "AllocParams",
+           "default_setup", "G", "RHO_AIR"]
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -53,13 +54,15 @@ class VehicleParams:
     I_z: float = cfg.geometry.I_z
     # wheels / drivetrain
     r_wheel: float = cfg.drivetrain.wheel_radius
-    I_wheel: float = cfg.drivetrain.I_wheel
+    I_wheel_f: float = cfg.drivetrain.I_wheel_front
+    I_wheel_r: float = cfg.drivetrain.I_wheel_rear
     gear_ratio: float = cfg.drivetrain.gear_ratio
     motor_T_peak: float = cfg.drivetrain.motor_torque_peak
     motor_kt: float = cfg.drivetrain.motor_kt
     motor_P_peak: float = cfg.drivetrain.motor_power_peak
     P_total_max: float = cfg.drivetrain.power_cap_total
     regen_speed_cutoff: float = cfg.drivetrain.regen_speed_cutoff
+    driven_wheels: int = cfg.drivetrain.driven_wheels
     # aero
     ClA: float = cfg.aero.ClA
     CdA: float = cfg.aero.CdA
@@ -70,6 +73,7 @@ class VehicleParams:
     lat_transfer_frac_front: float = cfg.loads.lat_transfer_frac_front
     # numerical guard
     v_eps: float = cfg.numerical.v_eps
+    w_eps: float = cfg.numerical.w_eps
 
     # ---- derived quantities (computed, never entered) ----------------------
     @property
@@ -95,6 +99,20 @@ class VehicleParams:
         """Peak torque available at ONE wheel (motor peak * gear ratio)."""
         return self.motor_T_peak * self.gear_ratio
 
+    @property
+    def I_wheel_corner(self) -> tuple:
+        """Spin inertia per corner, wheel order FL, FR, RL, RR."""
+        return (self.I_wheel_f, self.I_wheel_f, self.I_wheel_r, self.I_wheel_r)
+
+    @property
+    def T_drive_max(self) -> float:
+        """Peak torque the whole drivetrain can put on the ground: one wheel's
+        peak times the number of DRIVEN wheels. This is what 100% throttle
+        means — the pedal map, the driver adapter's exact inverse of it, and
+        every maneuver's torque budget all scale by it, so they must all read
+        this one property and never spell the motor count out again."""
+        return self.driven_wheels * self.T_wheel_max
+
 
 # ─────────────────────────────────────────────────────────────────────────
 # Tire (simplified Magic Formula) — model/physical/tires/params.yaml
@@ -117,16 +135,44 @@ class TireParams:
 # Controller constants — controllers/python/params.yaml
 # ─────────────────────────────────────────────────────────────────────────
 @dataclass
+class AllocParams:
+    """Four-corner allocator constants — controllers/python/awd/params.yaml.
+
+    A SIM DESIGN OUTPUT. Deliberately a separate dataclass from ControlParams
+    so the boundary with the firmware mirror is structural rather than a
+    comment: nothing in here exists in sdiff.c, and nothing in ControlParams
+    may be tuned by this sim."""
+    frac_front_base: float = cfg.controllers.awd.frac_front_base
+    k_load: float = cfg.controllers.awd.k_load
+    frac_front_min: float = cfg.controllers.awd.frac_front_min
+    frac_front_max: float = cfg.controllers.awd.frac_front_max
+    frac_rate: float = cfg.controllers.awd.frac_rate
+    ax_est_max: float = cfg.controllers.awd.ax_est_max
+    load_exponent: float = cfg.controllers.awd.load_exponent
+    share_min: float = cfg.controllers.awd.share_min
+    ay_ff_frac: float = cfg.controllers.awd.ay_ff_frac
+    ay_est_max: float = cfg.controllers.awd.ay_est_max
+    kappa_lim: float = cfg.controllers.awd.kappa_lim
+    k_spin: float = cfg.controllers.awd.k_spin
+    spin_floor: float = cfg.controllers.awd.spin_floor
+    spin_release_rate: float = cfg.controllers.awd.spin_release_rate
+
+
+@dataclass
 class ControlParams:
-    # open-loop s-diff (sdiff.c) — see controllers/python/params.yaml
-    steering_ratio: float = cfg.controllers.steering_ratio
+    # open-loop s-diff (sdiff.c) — see controllers/python/params.yaml.
+    # delta_max and deadband are road-wheel ANGLES: entered in the YAML as the
+    # same degrees the C #defines use, held here in radians like every other
+    # angle in the sim.
+    steering_ratio: float = cfg.controllers.steering_ratio   # mirrors the C; unused here
     delta_max: float = cfg.controllers.delta_max
     k_derate: float = cfg.controllers.k_derate
     k_inner: float = cfg.controllers.k_inner
     f_min: float = cfg.controllers.f_min
     deadband: float = cfg.controllers.deadband
     rate: float = cfg.controllers.rate
-    torque_clamp_Nm: float = cfg.controllers.torque_clamp_Nm
+    # --- the sim's own four-corner allocator (NOT a firmware mirror) --------
+    awd: AllocParams = field(default_factory=AllocParams)
 
 
 def default_setup():

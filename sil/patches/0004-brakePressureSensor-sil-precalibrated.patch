@@ -1,0 +1,48 @@
+Host build only — the firmware never calibrates the brake pressure sensor.
+
+BrakePressureSensor_new() calls BrakePressureSensor_resetCalibration(), which
+sets bps0_calibMin = bps0_calibMax = bps0->sensorValue. At construction that
+sensor has not been read yet, so both bounds are 0 and `calibrated` stays
+FALSE. BrakePressureSensor_update() then takes its uncalibrated branch every
+cycle, forcing percent = 0 and brakesAreOn = FALSE: the brake pressure the sim
+feeds in is thrown away and the VCU believes the brakes are never touched.
+
+Pre-load the same bounds the sensor's own specMin/specMax already describe and
+mark it calibrated. Same shape, and the same open question, as the throttle in
+0003: ask the VCU team how the car gets a calibrated brake today. If the answer
+is "a calibration routine", this patch goes away once the harness can drive
+that routine instead.
+
+Verified on the host with this patch applied — at apps = 50%, bps = 40 bar the
+firmware now reads mv = 2070, percent = 0.400, brakesAreOn = 1 and raises
+F_tpsbpsImplausible (faults = 0x400). Without it, percent stays 0.000 and the
+fault never fires.
+
+NOTE, and this is NOT something this patch can fix: the fault still does not
+reduce torque. Both rear motors stay at full 35000 mA through the whole
+implausibility. SafetyChecker_reduceTorque() computes multiplier = 0 correctly
+and then discards it — the four lines that apply it to powertrain->motor_* are
+commented out (safety.c, end of the function), disabled by upstream commit
+4c164a7 "commenting out cutting off motors" and still commented at 5df1baf.
+That is a firmware fix, not a host-build workaround, so it is deliberately not
+patched here. See docs/problems.txt section C.
+
+--- a/brakePressureSensor.c
++++ b/brakePressureSensor.c
+@@ -48,6 +48,16 @@
+     me->calibrated = FALSE;
+     BrakePressureSensor_resetCalibration(me);
+ 
++    // SIL: nothing calibrates the brake on the host. resetCalibration() sets
++    // calibMin = calibMax = bps0->sensorValue, which is 0 before the first ADC
++    // read, so there is never a usable span and the brakes read permanently
++    // OFF -- EV.4.7 plausibility and regen can never be exercised. Preload the
++    // datasheet bounds and mark it calibrated, exactly as the throttle patch
++    // does in 0003.
++    me->bps0_calibMin = 450;
++    me->bps0_calibMax = 4500;
++    me->calibrated = TRUE;
++
+     return me;
+ }
+ 

@@ -112,7 +112,7 @@ class TrackDriver:
         m, r_w = vp.m_total, vp.r_wheel
         self.kp = 4.0 * m * r_w
         self.ki = self.kp / 0.5
-        self.T_hold_max = hold_frac * 2.0 * vp.T_wheel_max
+        self.T_hold_max = hold_frac * vp.T_drive_max
         # heading targets
         self.psi_apex = 0.5 * self.theta
         r_kin = v_entry / radius
@@ -185,7 +185,11 @@ def track_maneuver(vp: VehicleParams, corner_slug, radius, throttle_pct=None,
     entry_frac = DEFAULT_ENTRY_FRAC if entry_frac is None else entry_frac
     theta_deg = CORNER_TYPES[corner_slug][0]
     v0 = entry_speed(radius, frac=entry_frac)
-    T_apex = throttle_pct / 100.0 * 2.0 * vp.T_wheel_max
+    # % of what the TIRES can take, not of what the motors can deliver — see
+    # the same note in maneuvers.corner_exit(). At 100% this is the grip limit,
+    # so the apex step is a genuine traction event at any drivetrain layout.
+    T_apex = throttle_pct / 100.0 * (cfg.tires.mu0_long * vp.m_total * G
+                                     * vp.r_wheel)
     drv = TrackDriver(vp, theta_deg, radius, v0, T_apex, direction=direction)
 
     # run length: entry + turn-in + the arc at entry speed + unwind + exit

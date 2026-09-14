@@ -30,6 +30,11 @@
 
 #include "sil_link.h"
 
+/* The SAS calibration constants (SAS_CENTER_MV, SAS_MV_PER_DEG_X10,
+ * SAS_INVERT, SAS_DIAG_*) — taken from the firmware's own header so the stub
+ * cannot drift away from steering_degrees(). */
+#include "sensorCalculations.h"
+
 #define SIL_CYCLE_US 10000UL 
 #define SIL_BPS_RANGE_BAR 100.0  /* the firmware's main-loop period */
 #define SIL_POLL_US  1UL       /* time a busy-wait poll is taken to cost */
@@ -144,9 +149,23 @@ IO_ErrorType IO_ADC_Get(ubyte1 adc_channel, ubyte2 *const adc_value,
     case IO_ADC_5V_06: *adc_value = span(apps, 400, 1400);  break;  /* TPS0, P149 */
     case IO_ADC_5V_01: *adc_value = span(apps, 1800, 4000); break;  /* TPS1, P140 */
     case IO_ADC_5V_07: *adc_value = span(bps, 450, 4500);   break;  /* BPS0, P137 */
-    case IO_ADC_5V_04:                                              /* SAS,  P150 */
-        /* sensorCalculations.c steering_degrees(): 960..2560 mV <-> -90..+90 deg */
-        *adc_value = span((sil_in.handwheel_deg + 90.0) / 180.0, 960, 2560); break;
+    case IO_ADC_5V_04: {                                            /* SAS,  P150 */
+        /* Inverse of steering_degrees() in sensorCalculations.c, which reads
+         *     deg = ((mv - SAS_CENTER_MV) * 10) / SAS_MV_PER_DEG_X10
+         * and negates when SAS_INVERT. Kept as the algebraic inverse of the
+         * firmware's own constants rather than a hand-fitted mV span: the two
+         * silently disagreed before (the old 960..2560 mV <-> +/-90 deg span
+         * was the sdiff-sil calibration, and against S-diff it put a
+         * straight-ahead wheel at +66 deg of handwheel).
+         * Clamped into the diagnostic window so an out-of-range steer angle
+         * saturates instead of tripping the sensor's range check, which would
+         * make steering_degrees() return FALSE and zero the angle. */
+        double h = SAS_INVERT ? -sil_in.handwheel_deg : sil_in.handwheel_deg;
+        double mv = SAS_CENTER_MV + h * SAS_MV_PER_DEG_X10 / 10.0;
+        if (mv < SAS_DIAG_LOW_MV)  mv = SAS_DIAG_LOW_MV;
+        if (mv > SAS_DIAG_HIGH_MV) mv = SAS_DIAG_HIGH_MV;
+        *adc_value = (ubyte2)(mv + 0.5);
+    } break;
     case IO_ADC_UBAT:  *adc_value = 26000; break;                  /* LV battery, mV: healthy 24 V pack */
     default:           *adc_value = 0; break;
     }

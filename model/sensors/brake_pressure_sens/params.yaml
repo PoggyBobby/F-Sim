@@ -45,7 +45,14 @@ t_regen_max:
   unit:   N*m
   symbol: "-"
   status: PLACEHOLDER — battery charge limit sets this
-  what:   Total rear-axle REGEN torque at full brake pressure (both motors).
+  what: >
+    Total REGEN torque at full brake pressure, across ALL driven wheels.
   need:   Allowed charge current -> torque
   how:    "Accumulator team: max charge C-rate"
   why:    Caps how much "braking" the sim's BPS can command.
+  note: >
+    Re-scoped 2026-09-09 from "rear axle (both motors)" to the whole car when
+    the sim gained four driven wheels. The VALUE did not change and should not:
+    the constraint is the accumulator's charge-current limit, which is a
+    vehicle-level number and does not double because two more motors can push
+    current into it. Only the distribution across wheels changed.

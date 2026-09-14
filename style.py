@@ -17,10 +17,17 @@ figure carries a legend and the animation direct-labels each car.
 
 # ── categorical: one slot per controller config, fixed order ─────────────
 CONFIG_COLORS = {
-    "open (50/50)": "#2a78d6",   # blue
-    "s-diff":       "#eb6834",   # orange (drawn last + slightly thicker)
-    "VCU (SIL)":    "#8a63d2",   # violet — the real firmware in the loop
+    "open 4WD":         "#2a78d6",   # blue
+    "4-corner AWD":     "#eb6834",   # orange (drawn last + slightly thicker)
+    "s-diff (RWD ref)": "#2f8f6b",   # green — the two-motor car, for comparison
+    "VCU (SIL)":        "#8a63d2",   # violet — the real firmware in the loop
 }
+
+
+def color_for(name):
+    """Config color, with a stable fallback. Every figure goes through this so
+    an unrecognised config name degrades to grey instead of raising."""
+    return CONFIG_COLORS.get(name, "#7a7a7a")
 
 # ── status: reserved, never used as a series color ───────────────────────
 STATUS_CRITICAL = "#d03b3b"      # rear wheel spinning (|kappa| over threshold)
@@ -56,9 +63,9 @@ RC = {
 
 
 def config_lw(name):
-    """The s-diff config is drawn slightly thicker and on top."""
-    return 2.2 if name == "s-diff" else 2.0
+    """The allocator config is drawn slightly thicker and on top."""
+    return 2.2 if name == "4-corner AWD" else 2.0
 
 
 def config_z(name):
-    return 3 if name == "s-diff" else 2
+    return 3 if name == "4-corner AWD" else 2

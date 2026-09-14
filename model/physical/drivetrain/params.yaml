@@ -6,9 +6,10 @@ about: >
   Wheels, gearing, motors and the power limits.
 
   Layout (team-confirmed 2026-08-30): FOUR motors fitted, one per wheel (hub
-  drive, planetary reduction in each upright) — the TWO REAR ones are active in
-  the current build, 4WD is the goal. This sim models the active 2-motor rear
-  axle; the 4WD extension is described in README.md.
+  drive, planetary reduction in each upright). The sim drives all four as of
+  2026-09-09; a rear-drive configuration is the same plant with zero front
+  torque. See README.md and the four-corner allocator's own params file,
+  controllers/python/awd/params.yaml.
 
   Motors: AMK "Racing Kit" A2370DD (DD5-type synchronous servo) with
   KW26-S5-FSE-4Q inverters — see docs/datasheets/AMK Racing Kit Datasheet.pdf
@@ -102,8 +103,9 @@ pack_voltage:
   how:    Accumulator design
   why: >
     Not used directly by the physics — it SETS motor peak power below.
-    4 motors x ~20 kW at 380 V = 80 kW exactly (the 4WD end state); the current
-    2-rear build tops out at ~40 kW, so the 80 kW cap is unreachable until 4WD.
+    4 motors x 20 kW at 380 V = 80 kW, which is EXACTLY the rules cap. That
+    leaves the cap zero headroom, so it can never bind: the per-motor power
+    limit is the operative constraint at every speed. See power_cap_total.
 
 motor_power_peak:
   label:  "Motor peak power"
@@ -116,7 +118,8 @@ motor_power_peak:
   how:    Read the 380 V curve in the AMK manual; dyno pull once the pack exists
   why: >
     Caps torque above ~17 m/s (37 mph): at 40 mph only 256 of 273 N*m is
-    available. The 2-rear build tops out around 40 kW.
+    available. Four motors top out at 80 kW — numerically identical to the
+    rules cap, so THIS per-motor limit is what actually binds, not the cap.
   note: >
     AMK kit manual 6.5.3 — peak power rides on HV voltage. Curves give ~26 kW
     at 500 VDC and ~32 kW at 600 VDC. Scaled to the 380 V pack three ways:
@@ -138,24 +141,48 @@ motor_max_speed:
     envelope, not the limiter. NOT enforced by this basic sim; recorded for
     completeness and future top-speed studies.
 
-I_wheel:
-  label:  "Wheel spin inertia"
+I_wheel_rear:
+  label:  "Wheel spin inertia, rear corner"
   value:  0.35
   unit:   kg*m^2
-  symbol: I_w
+  symbol: I_w,r
   status: DERIVED estimate — replace with CAD
   what: >
-    Spin inertia of ONE rear corner about the axle: tire + rim + brake rotor +
+    Spin inertia of ONE REAR corner about the axle: tire + rim + brake rotor +
     hub + (motor rotor inertia * gear_ratio^2).
-  need:   Rotating inertia of one corner
+  need:   Rotating inertia of one rear corner
   how:    CAD mass properties + rotor J from the exact AMK motor sheet
   why: >
     Sets how fast an unloaded wheel spins up — the s-diff's whole problem.
-    Controller gains are sensitive to it: retune when it changes.
+    Controller gains are sensitive to it: retune when it changes. Together with
+    I_wheel_front it also sets the effective mass the car must accelerate,
+    which verify.py D1 measures against a closed-form coast-down.
   note: >
     Estimate = tire+rim+hub ~0.30 (guess for an 18in tire on a 10in rim) +
     rotor inertia * gear^2 ~ 2.74e-4 * 13^2 ~ 0.05. The old report's
-    I_w = 3.033 was rejected: ~10x too large for one corner.
+    I_w = 3.033 was rejected: ~10x too large for one corner. Renamed from
+    `I_wheel` on 2026-09-08 when the sim gained front wheel-spin states; the
+    VALUE is unchanged.
+
+I_wheel_front:
+  label:  "Wheel spin inertia, front corner"
+  derived: drivetrain.I_wheel_rear
+  unit:   kg*m^2
+  symbol: I_w,f
+  status: DERIVED — front corner ASSUMED identical to rear; replace when CAD says otherwise
+  what: >
+    Spin inertia of ONE FRONT corner about the axle. Same construction as the
+    rear — same tire, same rim, same in-upright motor and planetary, same brake
+    rotor — so the same number, written as a formula so the ASSUMPTION is
+    visible in the data rather than buried in code.
+  need:   Rotating inertia of one front corner (CAD)
+  how:    CAD mass properties on the front upright assembly
+  why: >
+    The front rotor spins whether or not that motor is energised, so this
+    number is real for the 2-rear build too. It is the term the sim dropped
+    when it called the fronts "massless free-rollers": worth
+    2*I/r_w^2 = 13.4 kg of apparent mass, 5.3% of the car, and 0.6% on a 3 s
+    coast-down.
 
 power_cap_total:
   label:  "Total power cap"
@@ -169,6 +196,34 @@ power_cap_total:
   why: >
     Hard ceiling. The sim applies it to mechanical power (no drivetrain losses
     modeled) — the real car hits it ~10-15% earlier.
+    PRESENTLY UNREACHABLE: driven_wheels * motor_power_peak == this value
+    exactly, so the per-motor clip already implies it and the total-cap branch
+    is dead code (verify F16 reports the zero headroom). It becomes live the
+    moment motor_power_peak is revised upward — that number is DERIVED from kit
+    curves by three methods spanning 18.1-20.3 kW — or if driveline losses are
+    ever modelled, since the rules limit is electrical at the accumulator while
+    this one is applied to mechanical power.
+
+driven_wheels:
+  label:  "Driven wheels"
+  value:  4
+  unit:   "-"
+  symbol: n_drv
+  status: CURRENT CAR (four motors fitted, one per upright)
+  what: >
+    How many wheels receive drive torque. 4 = one motor per upright; 2 = the
+    rear pair only, which is what the current build runs.
+  need:   Which inverters are commissioned on the car
+  how:    "Powertrain: count enabled inverters"
+  why: >
+    The scale between "peak torque at ONE wheel" and "peak torque the driver
+    can ask for". Every axle-torque budget in the sim is n_drv * T_wheel_max:
+    the maneuver throttle steps, the APPS pedal map, the driver adapter's
+    exact inverse of it, and the plot ceilings.
+  note: >
+    NOT used by the plant. The plant has four wheel-torque inputs and a
+    rear-drive car is simply zero front torque — this number only sets how
+    much torque the DRIVER's 100% pedal means.
 
 regen_speed_cutoff:
   label:  "Regen speed cutoff"

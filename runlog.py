@@ -64,12 +64,16 @@ CODE_FILES = ("model/config.py", "model/params.py", "model/sim.py",
               "model/sensors/suite.py", "model/sensors/driver.py",
               "model/sensors/readings.py", "model/sensors/quantize.py",
               "model/sensors/imu_6axis/imu.py",
+              "model/sensors/vcu/vx_estimator.py",
               "model/sensors/wheel_speed/wss.py",
               "model/sensors/steering_angle/sas.py",
               "model/sensors/throttle_pos/apps.py",
               "model/sensors/brake_pressure_sens/bps.py",
               "model/maneuvers/maneuvers.py", "model/maneuvers/tracks.py",
+              "controllers/python/debug.py",
+              "controllers/python/torque_allocator.py",
               "controllers/python/torque_split.py",
+              "sil/vcu_sil.py",
               "run_sim.py", "runlog.py", "animate.py", "style.py",
               "verify.py", "tire_fit.py") + DATA_FILES
 
@@ -621,10 +625,11 @@ class RunRecorder:
             "params_changed": len(self.param_diff["changed"]),
             "changed_names": " ".join(sorted(self.param_diff["changed"])),
             "code_changed": " ".join(self.code_diff["changed"]),
-            "total_mass_kg": round(
-                self.params.get("CAR_MASS_NO_DRIVER", {}).get("value", float("nan"))
-                + self.params.get("DRIVER_MASS", {}).get("value", 0.0), 2),
-            "tire_mu0": self.params.get("TIRE_MU0", {}).get("value", ""),
+            # dotted config paths, as _write_summary already uses — the old
+            # pre-restructure keys (CAR_MASS_NO_DRIVER / TIRE_MU0) never matched
+            # the snapshot, so every row carried nan and an empty mu0.
+            "total_mass_kg": round(cfg.mass.total, 2),
+            "tire_mu0": cfg.tires.mu0,
             "placeholders": sum(1 for e in self.params.values()
                                 if e["tag"] == "PLACEHOLDER"),
             "maneuvers": " ".join(sorted(self.maneuvers)),

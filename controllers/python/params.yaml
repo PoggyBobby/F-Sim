@@ -1,104 +1,136 @@
 namespace: controllers
 order: 100
-title: "CONTROLLER CONSTANTS — open-loop s-diff (sdiff.h); placeholders until driven"
+title: "CONTROLLER CONSTANTS — open-loop s-diff, mirrored from sdiff.c"
 
 about: >
-  The constants sdiff.h leaves as 0 ("TODO: tune/define these ... PLS DONT
-  FLASH THIS"). steering_ratio and delta_max come from the team steering
-  chart; everything else is a sim placeholder to be tuned on-car.
+  The s-diff constants, mirrored one-for-one from the #defines at the top of
+  dev/sdiff.c on the SRE-VCU `S-diff` branch (currently 5df1baf, "sdiff run
+  3"). This file TRACKS the firmware — it is not a design output of this sim.
+  When the C changes, these change; when these change, nothing happens to the
+  car until someone edits sdiff.c.
 
-  These are NOT car data. They are a design output of this sim.
+  ANGLES ARE ROAD-WHEEL DEGREES, exactly as sdiff.c uses them:
+  sdiff.c computes delta = steering_deg / STEERING_RATIO and keeps everything
+  in degrees from there. The loader converts `unit: deg` to radians, and the
+  sim's `delta` is already a road-wheel angle in radians, so delta/delta_max
+  comes out numerically identical to the C's delta_deg/DELTA_MAX. Enter the
+  same number that is in the #define; do not hand-convert.
+
+  History worth knowing: on 2026-09-05 these were copied from S-diff's
+  degree-domain #defines while the `unit:` tag still said `rad`, which put
+  deadband at 57.3 deg — past full lock — so the inner/outer split never
+  engaged and the s-diff was a flat ~5% cut. Fixed 2026-09-08.
 
 steering_ratio:
   label:  "Steering ratio (handwheel : road-wheel)"
   value:  5.4
   unit:   "-"
   symbol: STEERING_RATIO
-  status: CURRENT CAR (team steering chart, near-center value)
+  status: CURRENT CAR (sdiff.c STEERING_RATIO)
   what:   Divides handwheel angle down to road-wheel angle in sdiff.c.
   need:   "-"
   how:    Team steering chart (sensors/steering_angle/params.yaml, A1 term)
-  why:    The ratio the real steering chart gives near center; the chart's own map (A0..A2) is the more accurate version at large angle.
+  why: >
+    Mirrors the C constant. NOT used by the Python controller — the sim gets
+    its road-wheel angle from the SAS polynomial map in
+    model/sensors/steering_angle/sas.py, which implies ~3.2:1 near center and
+    ~7.5:1 at lock. The flat 5.4 here and that map disagree; the map is the
+    more accurate model of the real linkage.
 
 delta_max:
-  label:  "Max road-wheel steering angle"
+  label:  "Steer angle at full derate"
   value:  2.0
-  unit:   rad
-  display_unit: 114.6 deg
+  unit:   deg
   symbol: DELTA_MAX
-  status: CURRENT CAR (team steering chart, full lock)
-  what:   Normalizes steer angle to 0-1 in sdiff.c (delta_norm).
-  need:   "-"
-  how:    Team steering chart, stated max road-wheel angle at full lock
-  why:    Matches the same 23.2 deg full-lock value used elsewhere in the sim.
+  status: SUSPECT — mirrors sdiff.c DELTA_MAX, but see note
+  what:   Normalizes steer angle to 0-1 in sdiff.c (delta_norm), clamped at 1.
+  need:   Confirmation from the VCU team that 2 deg is intended (see note)
+  how:    dev/sdiff.c on the S-diff branch
+  why: >
+    NOT full lock — this is the angle at which the derate SATURATES. At 2 deg
+    of road wheel (about 10.8 deg of handwheel at 5.4:1) delta_norm hits 1.0
+    and the inner-wheel cut is already at its maximum, so the s-diff behaves
+    close to on/off rather than progressive.
+  note: >
+    SUSPECT. This was 25 (about the 23.2 deg full-lock angle, which would make
+    the derate progressive across the whole steering range) until commit
+    ba13d61, whose message is "refactor comments and formatting in sdiff.h for
+    clarity" — a formatting commit that changed the value by 12.5x. That looks
+    like a typo, but it survived PNR runs #1-#3 with K_INNER tuned on top of
+    it. Ask the VCU team before anyone "fixes" it in either place.
 
 k_derate:
   label:  "Friction-budget derate gain"
-  value:  0.25
+  value:  0.0
   unit:   "-"
   symbol: K_DERATE
-  status: PLACEHOLDER — UNMEASURED, DO NOT FLASH
+  status: CURRENT CAR (sdiff.c K_DERATE)
   what:   How much total torque (both wheels) falls off as steer angle rises.
-  need:   On-car tuning once s-diff is driven
-  how:    Start low in sim, raise until corner-exit spin is contained without killing straight-line accel
-  why:    0 = no derate at all (open diff); too high kills exit power on shallow corners.
+  need:   "-"
+  how:    dev/sdiff.c on the S-diff branch
+  why: >
+    Deliberately zeroed in commit 18f9bc7 before the first on-car run: the
+    shared budget cut is OFF, so f = 1.0 always and f_min below is inert. The
+    s-diff currently biases left/right without taking any total power away.
 
 k_inner:
-  label:  "Inner-wheel extra derate gain"
-  value:  0.35
+  label:  "Inner-wheel derate gain"
+  value:  0.42
   unit:   "-"
   symbol: K_INNER
-  status: PLACEHOLDER — UNMEASURED, DO NOT FLASH
-  what:   Extra torque cut applied ONLY to the inner (unloaded) wheel on top of k_derate.
-  need:   On-car tuning
-  how:    Same as k_derate — this is the differential-mimicking term
-  why:    "The whole point of s-diff: keep the inner wheel from spinning up."
+  status: CURRENT CAR (sdiff.c K_INNER, tuned on car)
+  what:   Torque cut applied to the inner (unloaded) wheel, scaled by delta_norm.
+  need:   "-"
+  how:    Tuned on car across the PNR sessions
+  why: >
+    The whole point of the s-diff: keep the inner wheel from spinning up. At
+    full delta_norm the inner wheel gets 58% of the base torque. This is the
+    ONE constant with real on-car provenance — 0.35 (run #1) -> 0.45 (run #2,
+    3bd6d88) -> 0.42 (run #3, 5df1baf).
 
 f_min:
   label:  "Friction-budget floor"
   value:  0.5
   unit:   "-"
   symbol: F_MIN
-  status: PLACEHOLDER — UNMEASURED
-  what:   Lowest the shared (both-wheel) torque multiplier can fall to, even at full lock.
-  need:   On-car tuning
-  how:    Set so full-lock corners still have usable drive torque
-  why:    Without a floor, k_derate could zero out torque entirely at lock.
+  status: CURRENT CAR (sdiff.c F_MIN)
+  what:   Lowest the shared (both-wheel) torque multiplier can fall to.
+  need:   "-"
+  how:    dev/sdiff.c on the S-diff branch
+  why: >
+    Floors the k_derate budget cut. INERT while k_derate = 0 — f never leaves
+    1.0, so this clamp is never reached. It matters again the moment anyone
+    turns the shared derate back on.
 
 deadband:
   label:  "Steering deadband"
   value:  1.0
-  unit:   rad
-  display_unit: 57.3 deg
+  unit:   deg
   symbol: DEADBAND
-  status: PLACEHOLDER — UNMEASURED
-  what:   Steering angle band around center treated as "straight" (no inner/outer split).
-  need:   On-car tuning
-  how:    Should roughly match handwheel play / SAS noise floor
-  why:    Stops the inner/outer split from chattering when the driver is nominally straight.
+  status: CURRENT CAR (sdiff.c DEADBAND)
+  what:   Road-wheel angle band around center treated as "straight" (no split).
+  need:   "-"
+  how:    dev/sdiff.c on the S-diff branch
+  why: >
+    Stops the inner/outer split from chattering when the driver is nominally
+    straight. 1 deg of road wheel is about 5.4 deg of handwheel, comfortably
+    above the SAS quantization (0.5 deg at the handwheel).
 
 rate:
   label:  "Slew rate"
   value:  1.0
   unit:   Hz
   symbol: RATE
-  status: PLACEHOLDER — UNMEASURED
+  status: CURRENT CAR (sdiff.c RATE)
   what:   Max speed the friction-budget and left/right multipliers may change, per second.
-  need:   On-car tuning
-  how:    Slow enough to avoid a torque step the driver feels; fast enough to react within a corner
-  why:    Without slew limiting, torque would jump discontinuously at the deadband edges.
-
-torque_clamp_Nm:
-  label:  "s-diff per-wheel command clamp"
-  value:  2310.0
-  unit:   N*m
-  symbol: "-"
-  status: PLACEHOLDER — CARRIED OVER FROM sdiff.c, UNITS MISMATCH
-  what:   Hard clamp on each wheel's commanded torque in sdiff.c.
-  need:   Real inverter/motor current or torque limit (see custom-inverters CAN docs)
-  how:    Replace once the VESC current limit and torque constant are known
+  need:   "-"
+  how:    dev/sdiff.c on the S-diff branch
   why: >
-    2310 was sized for the old AMK inverters (tenths of N*m over CAN); the
-    custom inverters command milliamps instead, so this number is almost
-    certainly wrong for the real hardware and is kept only to mirror sdiff.c.
-
+    Without slew limiting, torque would jump discontinuously at the deadband
+    edges. At 1.0/s the full 0.42 inner cut takes 0.42 s to apply — far slower
+    than any sensor or loop latency in the stack, which is why loop delay is
+    not modeled here.
+  note: >
+    sdiff.c's slew() multiplies by a hardcoded SDIFF_LOOP_PERIOD = 0.01 s
+    regardless of how often it is actually called; the Python slew() takes the
+    real dt. At the 100 Hz VCU rate the two agree exactly.

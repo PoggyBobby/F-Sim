@@ -17,3 +17,20 @@ v_eps:
   why: >
     Below ~0.5 m/s wheel-slip math is untrustworthy — launches are out of scope
     until reworked.
+
+w_eps:
+  label:  "Wheel-speed guard"
+  value:  5.0
+  unit:   rad/s
+  symbol: w_eps
+  status: NUMERICAL GUARD
+  what: >
+    Floor on |wheel speed| when converting a per-motor POWER limit into a
+    torque limit (T_lim = P_peak / max(|omega|, w_eps)).
+  need:   Nothing (numerical)
+  how:    "-"
+  why: >
+    P = T*omega, so at standstill the power limit permits infinite torque.
+    Flooring the divisor caps it at P_peak/w_eps instead, which the per-wheel
+    peak-torque limit then covers. 5 rad/s is ~1.1 m/s of ground speed, below
+    the regen cutoff, so it never binds while the car is actually driving.

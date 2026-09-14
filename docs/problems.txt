@@ -149,6 +149,20 @@ B. REAL OUTPUT EFFECT
 C. DEFECTS — LARGEST OUTPUT EFFECT OF ANYTHING HERE
 ===================================================
 
+    ALL THREE FIXED 2026-09-09, in one commit, before the AWD work began.
+    None was covered by verify.py — the audit was 80/80 before and after —
+    which is exactly why they survived this long. Kept below with their
+    original descriptions because the CONSEQUENCES outlive the fixes:
+
+      * every track and split-mu result recorded before that commit is
+        INVALID. BUG 1 meant the corner tests ran on ~17 N*m of drag
+        feedforward instead of the apex step; the first honest run of
+        90deg R=6 immediately showed peak |kappa| = 13.3.
+      * BUG 2 also means every maneuver was being simulated TWICE, so
+        run_sim.py was ~2x slower than it needed to be.
+      * BUG 3 means every runs/index.csv row written before the fix has
+        total_mass_kg = nan and an empty tire_mu0.
+
 BUG 1  model/sim.py:76 kills the closed-loop track driver
     Lines 74-76 read:
         delta, T_req = (driver(t, s) if driver is not None
@@ -232,6 +246,64 @@ E. TWO THINGS TO KNOW BEFORE TOUCHING ANY OF IT
      (.venv/bin/python verify.py, exit 0) before landing anything above.
 
 
+F. FIRMWARE FINDINGS (SRE-VCU submodule — NOT ours to fix)
+==========================================================
+Found 2026-09-08 while aligning the Python s-diff with the C. Both are on
+the S-diff branch at 5df1baf ("sdiff run 3") — the tip the gitlink pins,
+the SIL builds, and the car was driven with at PNR runs #1-#3. Report
+upstream; do not patch the submodule.
+
+BUG 4  No safety condition reduces torque
+    File: dev/safety.c, end of SafetyChecker_reduceTorque()
+    The function computes `multiplier` correctly through every branch —
+    including multiplier = 0 for "any VCU fault exists", for HVIL
+    termination sense lost, and for the EV.4.7 APPS/BPS implausibility —
+    and then throws it away. The four lines that apply it:
+
+        // powertrain->motor_fl = (sbyte4)(powertrain->motor_fl * multiplier);
+        // powertrain->motor_fr = (sbyte4)(powertrain->motor_fr * multiplier);
+        // powertrain->motor_rl = (sbyte4)(powertrain->motor_rl * multiplier);
+        // powertrain->motor_rr = (sbyte4)(powertrain->motor_rr * multiplier);
+
+    are commented out. Disabled by commit 4c164a7 (2026-09-05, "commenting
+    out cutting off motors") and still commented at the tip.
+
+    Confirmed in the SIL, with patches/0004 applied so the brake reads at
+    all: at 50% APPS and 40 bar of brake the firmware sets percent = 0.400,
+    brakesAreOn = 1, and raises F_tpsbpsImplausible (faults = 0x400) — and
+    both rear motors stay at full 35000 mA for the whole event.
+
+    This is rules-critical: EV.4.7 / EV.5.7 require power to the motors to
+    be shut down completely when the brakes are actuated and APPS reads
+    over 25%, demonstrated at Technical Inspection. As written, nothing
+    shuts torque down for any reason.
+
+BUG 5  DELTA_MAX looks like a typo
+    File: dev/sdiff.c
+    DELTA_MAX went 25 -> 2 in commit ba13d61, whose message is "refactor
+    comments and formatting in sdiff.h for clarity" — a formatting commit
+    that moved a value by 12.5x. 25 is about the 23.2 deg full-lock road
+    wheel angle, which would make the derate ramp progressively across the
+    whole steering range. 2 makes delta_norm saturate at 2 deg of road
+    wheel (about 10.8 deg of handwheel at 5.4:1), so the inner-wheel cut is
+    effectively on/off rather than progressive.
+
+    It survived PNR runs #1-#3 with K_INNER tuned on top of it, so it may
+    now be load-bearing — changing it back to 25 would change the feel of
+    every corner and would need a retune. Ask before touching it.
+    controllers/python/params.yaml mirrors the current value (2.0) and tags
+    it SUSPECT rather than CURRENT CAR so it shows up in the team sheet.
+
+    Note this is NOT the units bug. That one (the sim consuming DELTA_MAX
+    and DEADBAND as radians while the C used degrees, which put the
+    deadband past full lock and reduced the s-diff to a flat ~5% cut) was
+    fixed on 2026-09-08. Its cause: on 2026-09-05, b6166ee copied S-diff's
+    degree-domain values into controllers/python/params.yaml without
+    touching `unit: rad`, mirroring submodule commit 5750309 which did the
+    same to the sdiff-sil header. S-diff had already fixed its own side in
+    cc6d859.
+
+
 SUGGESTED ORDER
 ===============
   1. Baseline: run verify.py, confirm 78/78 on this branch.
@@ -244,3 +316,78 @@ SUGGESTED ORDER
   6. Defer #6 and #7 until there is a baseline to retune against.
   7. Defer #4 until the suspension team delivers roll rates and roll-centre
      heights.
+
+
+G. FINDINGS FROM THE AWD WORK (2026-09-09)
+==========================================
+
+#9  The 80 kW rules cap is dead code, at 2WD and at 4WD alike
+    driven_wheels * motor_power_peak = 4 * 20 kW = 80 kW = power_cap_total,
+    EXACTLY. The per-motor clip already guarantees |T_i * w_i| <= P_peak for
+    every wheel, so the total is implied and the branch cannot fire; the
+    four-wheel power curve sits on 80.0 kW at every wheel speed. The
+    drivetrain YAML's claim that "the 80 kW cap is unreachable until 4WD" was
+    wrong in both directions and has been rewritten.
+    Kept implemented because motor_power_peak is DERIVED from kit curves
+    scaled to 380 V by three methods spanning 18.1-20.3 kW — a dyno above
+    20 kW makes the cap live. verify F16 reports the zero headroom as an
+    info line rather than pretending a check passes.
+
+#10 The per-motor power clip inverts the yaw split, and always has
+    |T| <= P/omega bites the FASTER wheel first — the outer one, which any
+    yaw split has just given MORE torque. Applying it per-wheel after a
+    difference-preserving shift turns a requested +100 N*m into -30.1 at
+    omega = 100/140. verify F7 has been reporting the two-motor symptom as
+    "finding #3" (requested dT 120, delivered 2.9 at 32 m/s) without naming
+    the cause. Fixed in the four-corner allocator by capping the axle
+    difference against the tighter of its two power headrooms BEFORE fitting
+    the mean; verify F14 pins it. The two-motor _apply_limits() is untouched,
+    so the RWD reference still shows the original behaviour.
+
+#11 A load-proportional left/right split has a stability cliff that MOVES
+    WITH TORQUE
+    More torque to the loaded outer wheel makes a yaw moment into the corner;
+    past a point that is oversteer, not vectoring. Worse, the moment scales
+    with the torque being split, so an exponent that is safe at one throttle
+    level is not safe at a higher one. Swept on corner_exit at 100 Hz:
+    p = 0.4 and 0.5 are stable at a 30%-of-grip request and SPIN at 35%.
+    Shipped at p = 0.3, the largest value stable across the range.
+    THE TRAP: dw RMSE improves monotonically right across the cliff, so any
+    sweep tuned on the objective alone walks straight off it. Every sweep
+    here needs a stability column.
+    Not fixed, bounded: the exponent has no torque awareness. A
+    yaw-rate-referenced term (torque_vectoring.py has the reference model)
+    would bound the moment directly instead of bounding its cause.
+
+#12 Two plotting bugs, both fixed
+    plot_wheels panel (0,1) plotted kRL and called it "inner-rear" — true
+    only in a LEFT-hand corner, so --track-right and the slalom's second half
+    were quietly showing the OUTER wheel. And the power panel had "@ 380 V"
+    baked into an f-string next to a hardcoded 2-motor ceiling, so the label
+    would have lied the moment pack_voltage moved.
+
+#13 Guard-expression quirks in the plant, NOT fixed
+    Two pre-existing inconsistencies now apply to four wheels instead of two:
+    slip ANGLE uses max(vcx, v_eps) (signed) while slip RATIO uses
+    max(|vcx|, v_eps) (absolute); and the slip ratio's numerator is signed
+    while its denominator is absolute, so kappa inverts sign relative to the
+    force direction once vcx < 0. Neither is reachable in any current
+    maneuver. A third case is new: at Fz = 0 the tire returns (0, 0), so a
+    LIFTED driven wheel has dw/dt = T/I with no reaction at all and lands
+    with a large slip ratio. verify G9 counts it (0 today, min Fz = 279 N).
+
+#14 The power cap is enforced at the VCU rate, so delivered power overshoots it
+    The controller caps the power it COMMANDS, computed from the wheel speeds
+    it last saw. The torque is then held for a full VCU cycle while the wheels
+    accelerate, so delivered power exceeds the commanded cap. Measured on a
+    full-throttle apex step (verify H2):
+        4 kHz control  peak 80.000 kW   -0.000%
+        100 Hz control peak 80.176 kW   +0.220%
+    EV.4.2 is measured continuously at the accumulator, so a real VCU needs
+    MARGIN BELOW the cap, not a command sitting exactly on it. 0.22% is small,
+    but it is a floor: it grows with cycle time, with wheel acceleration, and
+    it stacks on top of the fact that the sim caps MECHANICAL power while the
+    rules cap electrical power upstream of the losses.
+    Only visible on track runs — corner_exit and the scripted maneuvers never
+    approach the cap, which is why verify section G (which runs only those)
+    passes at its 0.1% tolerance.

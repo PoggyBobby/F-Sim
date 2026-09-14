@@ -1,4 +1,16 @@
-"""Torque-split controllers: open diff and software differential.
+"""The two-motor s-diff — a line-for-line mirror of sdiff.c, kept as a reference.
+
+THIS IS NO LONGER THE DEFAULT CONTROLLER. The sim drives four wheels; see
+controllers/python/torque_allocator.py. This module stays because it is what
+the SIL is diffed against and because it is the only way to attribute a metric
+change to AWD rather than to the allocator. Its constants track the firmware
+and must never be tuned here.
+
+Note it now runs on a four-wheel plant with a four-motor pedal map, so it
+saturates above ~50% APPS: two motors cannot deliver a four-motor request.
+That is the comparison, not a bug — every config gets the same T_req_total from
+the maneuver and the rear-drive car simply cannot put it down.
+
 
 With two independent rear motors there is no mechanical differential — the
 "differential" is whatever the software decides the left/right torque split
@@ -19,12 +31,17 @@ per-wheel request T_base = T_req_total / 2.
         inner side = left if delta > deadband, right if delta < -deadband,
                      neither inside the deadband (f still applies)
         f, g_left, g_right are slew-limited at `rate` per second, then
-        T_RL = T_base * f * g_left,  T_RR = T_base * f * g_right,
-        each clamped to ±torque_clamp_Nm.
+        T_RL = T_base * clamp(f * g_left,  0, 1),
+        T_RR = T_base * clamp(f * g_right, 0, 1).
    Same variable names as the C so the two can be diffed by eye. Two
    deliberate differences: no handwheel→road-wheel conversion (our delta is
    already a road-wheel angle in rad), and slew() takes dt instead of
    assuming the VCU's 10 ms loop. Constants: controllers/python/params.yaml.
+
+   ANGLE UNITS: sdiff.c works in road-wheel DEGREES. The YAML carries the
+   same numbers as the C #defines under `unit: deg`, so the loader hands this
+   code radians and delta/delta_max matches the C's delta_deg/DELTA_MAX
+   exactly. Do not reintroduce a degrees conversion here.
 
 Torque vectoring is parked in torque_vectoring.py (not imported).
 
@@ -44,21 +61,9 @@ Two update paths exist:
 """
 
 import math
-from dataclasses import dataclass
 from model.params import VehicleParams, TireParams, ControlParams
 from model.physical.vehicle import IVX, IR, IWRL, IWRR
-
-
-@dataclass
-class ControllerDebug:
-    dw_target: float = 0.0    # target wheel-speed difference wRR-wRL [rad/s]
-    dT_sdiff: float = 0.0     # s-diff torque-split contribution [N·m]
-    delta_norm: float = 0.0   # |steer| / delta_max, 0..1
-    f_applied: float = 1.0    # shared friction-budget multiplier (slewed)
-    g_left_appl: float = 1.0  # left-wheel multiplier (slewed)
-    g_right_appl: float = 1.0 # right-wheel multiplier (slewed)
-    T_RL: float = 0.0
-    T_RR: float = 0.0
+from controllers.python.debug import ControllerDebug
 
 
 def clampf(x, lo, hi):
@@ -120,13 +125,15 @@ class TorqueSplitController:
             self.g_left_appl = slew(self.g_left_appl, g_left, cp.rate, dt)
             self.g_right_appl = slew(self.g_right_appl, g_right, cp.rate, dt)
             dbg.f_applied, dbg.g_left_appl, dbg.g_right_appl = self.f_applied, self.g_left_appl, self.g_right_appl
-            T_RL = clampf(T_base * self.f_applied * self.g_left_appl,  -cp.torque_clamp_Nm, cp.torque_clamp_Nm)
-            T_RR = clampf(T_base * self.f_applied * self.g_right_appl, -cp.torque_clamp_Nm, cp.torque_clamp_Nm)
+            mult_left  = clampf(self.f_applied * self.g_left_appl,  0.0, 1.0)
+            mult_right = clampf(self.f_applied * self.g_right_appl, 0.0, 1.0)
+            T_RL = T_base * mult_left
+            T_RR = T_base * mult_right
         else:
             T_RL = T_RR = T_base
 
         T_RL, T_RR = self._apply_limits((T_RL + T_RR) / 2.0, T_RR - T_RL, vx, wRL, wRR)
-        dbg.T_RL, dbg.T_RR = T_RL, T_RR
+        dbg.T = (0.0, 0.0, T_RL, T_RR)   # rear drive: the fronts get nothing
         dbg.dT_sdiff = T_RR - T_RL
         return dbg
 
@@ -156,7 +163,7 @@ class TorqueSplitController:
         elif braking:
             T_req = -cfg.sensors.brake_pressure_sens.t_regen_max * min(sr.bps_bar / cfg.sensors.brake_pressure_sens.range_bar, 1.0)
         else:
-            T_req = 2.0 * self.vp.T_wheel_max * sr.apps_pct / 100.0
+            T_req = self.vp.T_drive_max * sr.apps_pct / 100.0
 
         # pseudo-state holding ONLY what the sensors gave us
         from model.physical.vehicle import NSTATES, IVX, IR, IWRL, IWRR

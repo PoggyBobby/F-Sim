@@ -15,15 +15,30 @@ Generated from the `params.yaml` files — regenerate with `.venv/bin/python par
 | `aero.cd_coeff` | `model/physical/aero/params.yaml` | FROM REPORT |
 | `aero.cl_coeff` | `model/physical/aero/params.yaml` | FROM REPORT |
 | `aero.frontal_area` | `model/physical/aero/params.yaml` | FROM REPORT |
-| `controllers.deadband` | `controllers/python/params.yaml` | PLACEHOLDER |
-| `controllers.delta_max` | `controllers/python/params.yaml` | CURRENT CAR |
-| `controllers.f_min` | `controllers/python/params.yaml` | PLACEHOLDER |
-| `controllers.k_derate` | `controllers/python/params.yaml` | PLACEHOLDER |
-| `controllers.k_inner` | `controllers/python/params.yaml` | PLACEHOLDER |
-| `controllers.rate` | `controllers/python/params.yaml` | PLACEHOLDER |
+| `controllers.awd.ax_est_max` | `controllers/python/awd/params.yaml` | TUNED (sim) |
+| `controllers.awd.ay_est_max` | `controllers/python/awd/params.yaml` | NUMERICAL GUARD |
+| `controllers.awd.ay_ff_frac` | `controllers/python/awd/params.yaml` | TUNED (sim) |
+| `controllers.awd.frac_front_base` | `controllers/python/awd/params.yaml` | TUNED (sim) |
+| `controllers.awd.frac_front_max` | `controllers/python/awd/params.yaml` | TUNED (sim) |
+| `controllers.awd.frac_front_min` | `controllers/python/awd/params.yaml` | TUNED (sim) |
+| `controllers.awd.frac_rate` | `controllers/python/awd/params.yaml` | TUNED (sim) |
+| `controllers.awd.k_load` | `controllers/python/awd/params.yaml` | TUNED (sim) |
+| `controllers.awd.k_spin` | `controllers/python/awd/params.yaml` | TUNED (sim) |
+| `controllers.awd.kappa_lim` | `controllers/python/awd/params.yaml` | TUNED (sim) |
+| `controllers.awd.load_exponent` | `controllers/python/awd/params.yaml` | TUNED (sim) |
+| `controllers.awd.share_min` | `controllers/python/awd/params.yaml` | NUMERICAL GUARD |
+| `controllers.awd.spin_floor` | `controllers/python/awd/params.yaml` | TUNED (sim) |
+| `controllers.awd.spin_release_rate` | `controllers/python/awd/params.yaml` | TUNED (sim) |
+| `controllers.deadband` | `controllers/python/params.yaml` | CURRENT CAR |
+| `controllers.delta_max` | `controllers/python/params.yaml` | SUSPECT |
+| `controllers.f_min` | `controllers/python/params.yaml` | CURRENT CAR |
+| `controllers.k_derate` | `controllers/python/params.yaml` | CURRENT CAR |
+| `controllers.k_inner` | `controllers/python/params.yaml` | CURRENT CAR |
+| `controllers.rate` | `controllers/python/params.yaml` | CURRENT CAR |
 | `controllers.steering_ratio` | `controllers/python/params.yaml` | CURRENT CAR |
-| `controllers.torque_clamp_Nm` | `controllers/python/params.yaml` | PLACEHOLDER |
-| `drivetrain.I_wheel` | `model/physical/drivetrain/params.yaml` | DERIVED |
+| `drivetrain.I_wheel_front` | `model/physical/drivetrain/params.yaml` | DERIVED |
+| `drivetrain.I_wheel_rear` | `model/physical/drivetrain/params.yaml` | DERIVED |
+| `drivetrain.driven_wheels` | `model/physical/drivetrain/params.yaml` | CURRENT CAR |
 | `drivetrain.gear_ratio` | `model/physical/drivetrain/params.yaml` | FROM REPORT |
 | `drivetrain.motor_kt` | `model/physical/drivetrain/params.yaml` | PLACEHOLDER |
 | `drivetrain.motor_max_speed` | `model/physical/drivetrain/params.yaml` | CURRENT CAR |
@@ -49,6 +64,7 @@ Generated from the `params.yaml` files — regenerate with `.venv/bin/python par
 | `mass.driver` | `model/physical/mass/params.yaml` | CURRENT CAR |
 | `mass.total` | `model/physical/mass/params.yaml` | DERIVED |
 | `numerical.v_eps` | `model/physical/numerical/params.yaml` | NUMERICAL GUARD |
+| `numerical.w_eps` | `model/physical/numerical/params.yaml` | NUMERICAL GUARD |
 | `sensors.brake_pressure_sens.actuated_bar` | `model/sensors/brake_pressure_sens/params.yaml` | PLACEHOLDER |
 | `sensors.brake_pressure_sens.quant_bar` | `model/sensors/brake_pressure_sens/params.yaml` | PLACEHOLDER |
 | `sensors.brake_pressure_sens.range_bar` | `model/sensors/brake_pressure_sens/params.yaml` | PLACEHOLDER |
@@ -66,6 +82,8 @@ Generated from the `params.yaml` files — regenerate with `.venv/bin/python par
 | `sensors.vcu.plaus_apps_restore` | `model/sensors/vcu/params.yaml` | RULES VALUE |
 | `sensors.vcu.rate_hz` | `model/sensors/vcu/params.yaml` | PLACEHOLDER |
 | `sensors.vcu.seed` | `model/sensors/vcu/params.yaml` | NUMERICAL GUARD |
+| `sensors.vcu.vx_spread_ref` | `model/sensors/vcu/params.yaml` | TUNED (sim) |
+| `sensors.vcu.vx_tau` | `model/sensors/vcu/params.yaml` | TUNED (sim) |
 | `sensors.wheel_speed.quant_rpm` | `model/sensors/wheel_speed/params.yaml` | PLACEHOLDER |
 | `sil.boot_s` | `sil/params.yaml` | PLACEHOLDER |
 | `steering.ackermann_fraction` | `model/physical/steering/params.yaml` | PLACEHOLDER |

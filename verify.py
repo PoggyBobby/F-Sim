@@ -35,11 +35,16 @@ import numpy as np
 
 from model.params import VehicleParams, TireParams, ControlParams, default_setup, G, RHO_AIR
 from model.physical.tires.tire import MagicFormulaTire
-from model.physical.vehicle import (VehicleModel, front_steer_angles, NSTATES, IX, IY, IPSI,
+from model.physical.vehicle import (VehicleModel, front_steer_angles, NSTATES, NWHEELS,
+                                    IW, WHEEL_NAMES, free_rolling_omegas,
+                                    wheel_steer_angles,
+                                    contact_speeds, IX, IY, IPSI,
                      IVX, IVY, IR, IWRL, IWRR)
-from controllers.python.torque_split import TorqueSplitController, make_configs
+from controllers.python.torque_split import TorqueSplitController
+from controllers.python.torque_allocator import (make_configs, FourCornerAllocator,
+                                                 axle_load_fraction, ax_feedforward)
 from model.maneuvers.maneuvers import Maneuver, step_steer, corner_exit, slalom
-from model.sim import simulate, metrics, rk4_step
+from model.sim import simulate, metrics
 
 FAIL = []
 RESULTS = []
@@ -139,6 +144,24 @@ def section_a():
           and tire.combined(0.3, 0.2, -50.0) == (0.0, 0.0))
     check("A5", "zero slip / zero load → zero force (incl. negative load)", ok)
 
+    # A6: combined(0, α, Fz) is BIT-IDENTICAL to (0, lateral(α, Fz)). This is
+    # the identity the whole four-wheel change rests on — it is why a
+    # zero-torque wheel reproduces the old free-roller branch exactly, and why
+    # the plant needs no `if undriven` branch. Asserted with ==, not a
+    # tolerance: _mf(0) = 0 kills Fx, and pure lateral force can never exceed
+    # the ellipse because D = µ·Fz is the curve's own peak, so the cap never
+    # fires.
+    worst_fx = worst_fy = 0.0
+    for Fz_ in (0.0, -50.0, 200.0, 537.0, 900.0, 1600.0):
+        for adeg in np.linspace(-20.0, 20.0, 121):
+            fx, fy = tire.combined(0.0, math.radians(adeg), Fz_)
+            worst_fx = max(worst_fx, abs(fx))
+            worst_fy = max(worst_fy, abs(fy - tire.lateral(math.radians(adeg), Fz_)))
+    check("A6", "combined(0, α, Fz) ≡ (0, lateral(α, Fz)) exactly",
+          worst_fx == 0.0 and worst_fy == 0.0,
+          f"over 6 loads × 121 slip angles: max |Fx| = {worst_fx}, "
+          f"max |Fy − lateral| = {worst_fy} (exact zeros, not tolerances)")
+
 
 # ═══════════════════════════════════════════════ B. vertical loads
 def section_b():
@@ -187,6 +210,39 @@ def section_b():
     check("B3", "total lateral transfer = m·ay·h/track",
           abs(dF_tot / want - 1) < 1e-12, f"{dF_tot:.1f} vs {want:.1f} N")
 
+    # B5: axle-load statics under longitudinal acceleration, against the
+    # textbook moment balance derived here independently. This is the term the
+    # four-corner allocator has to estimate, so it is worth pinning exactly.
+    worst = 0.0
+    for ax in (0.0, 4.0, 8.0, 11.0):
+        Fz_ = VehicleModel(VehicleParams(ClA=0.0), MagicFormulaTire(tp_f),
+                           MagicFormulaTire(tp_r)).wheel_loads(0.0, ax, 0.0)
+        got = (Fz_[0] + Fz_[1]) / (Fz_[2] + Fz_[3])
+        want = ((G * vp.b - ax * vp.h_cg) / (G * vp.a + ax * vp.h_cg))
+        worst = max(worst, abs(got / want - 1))
+    check("B5", "front/rear axle load ratio matches the moment balance under ax",
+          worst < 1e-12, f"worst relative error {worst:.1e} over ax = 0…11 m/s²")
+
+    # B6: the coupling AWD introduces. Longitudinal transfer unloads the front,
+    # so per-wheel LONGITUDINAL capacity µx(Fz)·Fz diverges between the axles —
+    # the front tire saturates at a torque the rear cannot even reach.
+    ratios = []
+    for ax in (0.0, 4.0, 8.0, 11.0):
+        Fz_ = model.wheel_loads(10.0, ax, 0.0)
+        cap_f = model.tires[0].mu_x(Fz_[0]) * Fz_[0]
+        cap_r = model.tires[2].mu_x(Fz_[2]) * Fz_[2]
+        ratios.append(cap_r / cap_f)
+    rising = all(b > a for a, b in zip(ratios, ratios[1:]))
+    check("B6", "rear/front longitudinal capacity grows with acceleration",
+          ratios[0] > 1.0 and rising,
+          "ratio " + " → ".join(f"{r:.3f}" for r in ratios) + " at ax = 0/4/8/11 m/s²")
+    Fz8 = model.wheel_loads(10.0, 8.0, 0.0)
+    info("B6", "per-wheel saturating torque at 0.8 g",
+         f"front {model.tires[0].mu_x(Fz8[0]) * Fz8[0] * vp.r_wheel:.1f} N·m vs rear "
+         f"{model.tires[2].mu_x(Fz8[2]) * Fz8[2] * vp.r_wheel:.1f} N·m, against "
+         f"{vp.T_wheel_max:.0f} N·m per motor — a front motor can overwhelm its "
+         "own tire at 60% of its peak while the rears cannot saturate at all")
+
     # B4: wheel lift — clamp engages, no negative load ever escapes.
     Fzx = model.wheel_loads(0.0, 0.0, 60.0)     # absurd ay to force lift
     check("B4", "extreme ay lifts inner wheels to exactly 0 (never negative)",
@@ -204,7 +260,8 @@ def section_c():
     vx, vy, r, delta = 15.0, 0.4, 0.5, 0.06
     s = [0.0] * NSTATES
     s[IVX], s[IVY], s[IR] = vx, vy, r
-    s[IWRL] = s[IWRR] = vx / vp.r_wheel
+    for j, w0 in zip(IW, free_rolling_omegas(model, s, delta)):
+        s[j] = w0                      # all four rolling, kappa = 0 by construction
     Fz = model.wheel_loads(vx, 0.0, 0.0)
     w = model.tire_forces(s, delta, Fz)
     a_f_txt = delta - (vy + vp.a * r) / vx
@@ -224,16 +281,31 @@ def section_c():
     # this check used the CG speed and wrongly failed the sim. Set each rear
     # wheel to its own contact speed: κ must be ~0; then overspeed one by 10%.
     s3 = list(s)
-    s3[IWRL] = (vx - r * model.wheel_xy[2][1]) / vp.r_wheel
-    s3[IWRR] = (vx - r * model.wheel_xy[3][1]) / vp.r_wheel
+    for j, w0 in zip(IW, free_rolling_omegas(model, s, delta)):
+        s3[j] = w0
     w3 = model.tire_forces(s3, delta, Fz)
-    k_roll = max(abs(w3["kappa"][2]), abs(w3["kappa"][3]))
-    s3[IWRL] *= 1.10
+    k_roll = max(abs(k) for k in w3["kappa"])
+    s3[IW[0]] *= 1.10                       # overspeed FL — the STEERED wheel
     w4 = model.tire_forces(s3, delta, Fz)
-    check("C2", "per-wheel rolling → κ≈0; +10% overspeed → κ≈0.10",
-          k_roll < 1e-6 and abs(w4["kappa"][2] - 0.10) < 2e-3,
-          f"κ_roll = {k_roll:.2e}, κ_overspeed = {w4['kappa'][2]:.4f} "
-          "(the sim correctly uses per-wheel contact speed, incl. the r·y term)")
+    check("C2", "per-wheel rolling → κ≈0 on all four; +10% overspeed → κ≈0.10",
+          k_roll < 1e-6 and abs(w4["kappa"][0] - 0.10) < 2e-3,
+          f"κ_roll = {k_roll:.2e} (worst of 4), κ_overspeed = {w4['kappa'][0]:.4f} "
+          "(per-wheel contact speed incl. the r·y term, resolved along the "
+          "wheel's own heading)")
+
+    # C2b: the front rolling speed is a WHEEL-FRAME quantity. Building it the
+    # rear way — (vx − r·y)/r_w, ignoring the steer projection — must FAIL.
+    s_naive = list(s3)
+    s_naive[IW[0]] = (vx - r * model.wheel_xy[0][1]) / vp.r_wheel
+    s_naive[IW[1]] = (vx - r * model.wheel_xy[1][1]) / vp.r_wheel
+    w_naive = model.tire_forces(s_naive, delta, Fz)
+    k_naive = max(abs(w_naive["kappa"][0]), abs(w_naive["kappa"][1]))
+    vcx_f = contact_speeds(model, s, delta)[0]
+    check("C2b", "steered front rolls at v_cx/r_w, not (vx−r·y)/r_w",
+          k_naive > 1e-4,
+          f"the naive rear-style speed leaves κ = {k_naive:.2e} on the fronts "
+          f"at δ = {math.degrees(delta):.1f}° (v_cx = {vcx_f:.4f} vs "
+          f"vx − r·y = {vx - r * model.wheel_xy[0][1]:.4f} m/s)")
 
     # C3: the s-diff target. In a steady left turn the RIGHT (outer) wheel
     # must spin faster; target Δω = r·track/r_wheel from wheel path speeds
@@ -276,6 +348,74 @@ def section_c():
          "normal driving, real at full lock. ACKERMANN_FRACTION is still "
          "0.0 (parallel) pending the steering team's curve interpretation")
 
+    # C8: the zero-front-torque identity — the regression lever for the whole
+    # four-wheel change. With no front torque the front wheels must sit at
+    # kappa = 0 and make NO longitudinal force, i.e. reproduce the old
+    # free-roller branch exactly. (A steady-trim identity, not a trajectory
+    # claim: in a TRANSIENT the fronts legitimately make force — that is their
+    # rotational inertia, and D1 measures it against a closed form.)
+    s8 = list(s)
+    for j, w0 in zip(IW, free_rolling_omegas(model, s, delta)):
+        s8[j] = w0
+    w8 = model.tire_forces(s8, delta, Fz)
+    worst_fx = max(abs(w8["Fx_w"][0]), abs(w8["Fx_w"][1]))
+    worst_fy = max(abs(w8["Fy_w"][i] - model.tires[i].lateral(w8["alpha"][i], Fz[i]))
+                   for i in (0, 1))
+    check("C8", "zero front torque → fronts make no Fx and pure lateral Fy",
+          worst_fx < 1e-9 and worst_fy < 1e-9,
+          f"front |Fx_w| = {worst_fx:.1e} N, |Fy_w − lateral()| = {worst_fy:.1e} N "
+          "— combined(0, α, Fz) is bit-identically (0, lateral(α, Fz))")
+
+    # C6: the yaw moment a FRONT left/right torque split makes. Until the
+    # fronts were driven, front Fx_w was identically 0, so half of the
+    # body-frame rotation at the bottom of tire_forces() was dead code.
+    #
+    # At delta = 0, with Fx on the fronts only:
+    #     Mz = Σ(x·Fy_b − y·Fx_b) = −y_FL·Fx_FL − y_FR·Fx_FR
+    #        = −(t_f/2)·Fx_FL + (t_f/2)·Fx_FR = +(t_f/2)·ΔFx
+    # with ΔFx = Fx_FR − Fx_FL. Note the HALF: the couple arm is the
+    # half-track, not the track.
+    dFx = 600.0
+    fx = [-dFx / 2.0, +dFx / 2.0, 0.0, 0.0]
+    Mz_front = sum(x * 0.0 - y * f for (x, y), f in zip(model.wheel_xy, fx))
+    check("C6", "front L/R force split: Mz = +(track_f/2)·ΔFx",
+          abs(Mz_front - 0.5 * vp.track_f * dFx) < 1e-9,
+          f"Mz {Mz_front:+.3f} vs hand-derived {0.5 * vp.track_f * dFx:+.3f} N·m "
+          f"for ΔFx = {dFx:.0f} N (positive ΔFx → nose LEFT)")
+
+    # C6b: a DRIVEN AND STEERED front wheel. Its drive force rotates into BOTH
+    # body axes, so it adds an x·Fy yaw term the rear axle has no equivalent
+    # of. Check the rotation per wheel straight out of the plant.
+    s6 = list(s)
+    for j, w0 in zip(IW, free_rolling_omegas(model, s, delta)):
+        s6[j] = w0
+    s6[IW[0]] *= 1.05                      # spin FL up: real front Fx at last
+    w6 = model.tire_forces(s6, delta, Fz)
+    st6 = wheel_steer_angles(vp, delta)
+    worst_rot = 0.0
+    for i in range(NWHEELS):
+        cd, sd = math.cos(st6[i]), math.sin(st6[i])
+        worst_rot = max(worst_rot,
+                        abs(w6["Fx_b"][i] - (w6["Fx_w"][i] * cd - w6["Fy_w"][i] * sd)),
+                        abs(w6["Fy_b"][i] - (w6["Fx_w"][i] * sd + w6["Fy_w"][i] * cd)))
+    check("C6b", "driven+steered front: body-frame rotation exact per wheel",
+          worst_rot < 1e-12 and abs(w6["Fx_w"][0]) > 1.0,
+          f"worst rotation error {worst_rot:.1e} N with front Fx_w = "
+          f"{w6['Fx_w'][0]:.1f} N at δ = {math.degrees(delta):.1f}°")
+    info("C6b", "the steer-projection yaw arm the rear axle does not have",
+         "a·sin δ vs (t_f/2)·cos δ = " + ", ".join(
+             f"{math.degrees(d):.0f}°: {100 * vp.a * math.sin(d) / (0.5 * vp.track_f * math.cos(d)):.0f}%"
+             for d in (math.radians(5), math.radians(8), math.radians(23))))
+
+    # C7: at delta = 0 the two axles buy identical yaw per newton — but only
+    # because track_f == track_r on this car. The allocator needs to know that.
+    fx_r = [0.0, 0.0, -dFx / 2.0, +dFx / 2.0]
+    Mz_rear = sum(x * 0.0 - y * f for (x, y), f in zip(model.wheel_xy, fx_r))
+    check("C7", "front and rear L/R splits give the same Mz at δ = 0",
+          abs(Mz_front - Mz_rear) < 1e-12,
+          f"{Mz_front:+.3f} vs {Mz_rear:+.3f} N·m — equal ONLY because "
+          f"track_f = track_r = {vp.track_f:.2f} m today")
+
     # C4: yaw moment sum — synthetic forces with a hand-computed answer.
     Mz_hand = 0.0
     forces = [(120.0, 800.0), (-40.0, 900.0), (300.0, 400.0), (250.0, 350.0)]
@@ -297,17 +437,21 @@ def section_d():
     model = VehicleModel(vp, MagicFormulaTire(tp_f), MagicFormulaTire(tp_r))
 
     # D1: coast-down. δ=0, T=0 → only drag decelerates. Closed form for
-    # dv/dt = −k·v²/m_eff with m_eff = m + 2·I_w/r_w² (the spinning rear
-    # wheels store rotational KE; fronts are massless free-rollers here).
+    # dv/dt = −k·v²/m_eff with m_eff = m + 2·(I_wf + I_wr)/r_w² — ALL FOUR
+    # wheels store rotational KE now that the fronts have a spin state.
     coast = Maneuver("coast", "coast", 3.0, 15.0, lambda t: (0.0, 0.0))
     ctrl = make_configs(vp, tp_f, tp_r, cp)[0]
     log = simulate(model, ctrl, coast, dt=2.5e-4)
     k = 0.5 * RHO_AIR * vp.CdA
-    m_eff = vp.m_total + 2 * vp.I_wheel / vp.r_wheel ** 2
+    m_eff = vp.m_total + 2 * (vp.I_wheel_f + vp.I_wheel_r) / vp.r_wheel ** 2
     v_pred = 15.0 / (1 + k * 15.0 * 3.0 / m_eff)
     v_sim = log["vx"][-1]
+    # 0.1%, not 1%: with 4 spinning wheels the WRONG (2-wheel) m_eff is only
+    # 0.63% away, so a 1% tolerance cannot tell the two apart and would pass
+    # either. At 0.1% this is the strongest single proof that the two new front
+    # spin states integrate correctly.
     check("D1", "coast-down matches closed-form drag solution (with wheel KE)",
-          abs(v_sim / v_pred - 1) < 0.01,
+          abs(v_sim / v_pred - 1) < 1e-3,
           f"vx(3 s): sim {v_sim:.3f} vs closed form {v_pred:.3f} m/s")
     check("D1", "coast stays perfectly straight",
           abs(log["r"]).max() < 1e-10 and abs(log["Y"]).max() < 1e-8,
@@ -316,6 +460,17 @@ def section_d():
     info("D1", "wheel-inertia effect on coast",
          f"{abs(m_nowheel - v_pred) * 1000:.0f} mm/s over 3 s — I_WHEEL is "
          "visible but small here; it matters most in spin-up, not coasting")
+
+    # D5: the pointwise mechanism whose integral D1 checks. Coasting with zero
+    # torque, the front wheels are DECELERATING the car's forward motion into
+    # their own rotation, so they must sit at a small POSITIVE slip ratio and
+    # push the car along — the free-roller model made this force identically 0.
+    kf = np.concatenate([log["kFL"], log["kFR"]])
+    check("D5", "coasting fronts carry a small positive slip ratio (their KE)",
+          kf.min() >= 0.0 and kf.max() < 5e-3,
+          f"front κ over the coast: {kf.min():.2e} … {kf.max():.2e} — the "
+          f"{2 * vp.I_wheel_f / vp.r_wheel ** 2:.1f} kg of front rotational "
+          "inertia the old massless free-roller ignored")
 
     # D2: mirror symmetry. Same maneuver with steer sign flipped must give
     # the exactly mirrored trajectory — catches ANY left/right sign error.
@@ -405,7 +560,9 @@ def section_e():
 # ═══════════════════════════════════ F. controller limit unit tests
 def section_f():
     vp, tp_f, tp_r, cp = default_setup()
-    ctrl = make_configs(vp, tp_f, tp_r, cp)[1]
+    # index 2 is the rear-drive s-diff reference: F8-F11 test the sdiff.c LAW,
+    # not the four-corner allocator, so they must hold onto that controller.
+    ctrl = make_configs(vp, tp_f, tp_r, cp)[2]
     Tmax = vp.T_wheel_max
 
     # F1: no limits active — pure split.
@@ -462,7 +619,8 @@ def section_f():
     #   RL (inner) = T_base*f*g_in,  RR (outer) = T_base*f
     s = [0.0] * NSTATES
     s[IVX] = 10.0
-    s[IWRL] = s[IWRR] = 10.0 / vp.r_wheel
+    for j in IW:
+        s[j] = 10.0 / vp.r_wheel
     ctrl.reset()
     for _ in range(200):                     # 2 s at 10 ms — slew fully settled
         d = ctrl.update(s, +cp.delta_max, 200.0, 0.01)
@@ -487,18 +645,108 @@ def section_f():
     ctrl.reset()
     for _ in range(200):
         d = ctrl.update(s, 0.5 * cp.deadband, 200.0, 0.01)
+    # (with k_derate = 0 the budget term is inert and f_db is exactly 1.0 —
+    # what F10 still proves is that the two sides stay equal.)
     f_db = max(1.0 - cp.k_derate * (0.5 * cp.deadband / cp.delta_max), cp.f_min)
     check("F10", "s-diff inside deadband: equal sides, budget-only derate",
           abs(d.T_RL - d.T_RR) < 1e-12 and abs(d.T_RL - 100.0 * f_db) < 1e-9,
           f"RL {d.T_RL:.2f} / RR {d.T_RR:.2f} (f = {f_db:.4f}, no L/R split)")
 
     # F11: slew actually limits — one 10 ms step from straight toward full
-    # lock may move f by at most rate*dt.
+    # lock may move a multiplier by at most rate*dt. Probed on g_left, the
+    # INNER multiplier: with k_derate = 0 (the current sdiff.c) f's target is
+    # 1.0, so f never leaves its 1.0 start and cannot exercise the slew.
     ctrl.reset()
     d = ctrl.update(s, +cp.delta_max, 200.0, 0.01)
-    check("F11", "s-diff slew: one step moves f by <= rate*dt",
-          abs(d.f_applied - (1.0 - cp.rate * 0.01)) < 1e-9,
-          f"f after one step {d.f_applied:.4f} (limit {1.0 - cp.rate * 0.01:.4f})")
+    check("F11", "s-diff slew: one step moves g_left by <= rate*dt",
+          abs(d.g_left_appl - (1.0 - cp.rate * 0.01)) < 1e-9,
+          f"g_left after one step {d.g_left_appl:.4f} "
+          f"(limit {1.0 - cp.rate * 0.01:.4f})")
+
+
+def section_f2():
+    """The four-corner allocator's limit chain — F12..F16."""
+    vp, tp_f, tp_r, cp = default_setup()
+    T_max = vp.T_wheel_max
+    alloc = make_configs(vp, tp_f, tp_r, cp)[1]
+    openc = make_configs(vp, tp_f, tp_r, cp)[0]
+    s = [0.0] * NSTATES
+    s[IVX] = 15.0
+    for j in IW:
+        s[j] = 15.0 / vp.r_wheel
+
+    # F12: with the law switched off the allocator IS an open differential —
+    # exactly T_req/4 at every corner. This is why the baseline config shares
+    # this code path instead of being a separate class.
+    d = openc.update(s, 0.1, 400.0, 0.01)
+    check("F12", "law off → exact even four-way split (an open diff)",
+          all(abs(t - 100.0) < 1e-12 for t in d.T),
+          " / ".join(f"{t:.6f}" for t in d.T) + " N·m for a 400 N·m request")
+
+    # F13: unsaturated, the allocation is conserved — nothing is invented or
+    # lost between the request and the four commands.
+    d = alloc.update(s, 0.0, 400.0, 0.01)
+    check("F13", "unsaturated: the four commands sum to the request",
+          abs(sum(d.T) - 400.0) < 1e-9,
+          f"Σ T = {sum(d.T):.6f} vs 400 N·m requested, split "
+          f"{d.T_FL + d.T_FR:.1f} front / {d.T_RL + d.T_RR:.1f} rear")
+
+    # F14: THE invariant the limit chain exists for. The per-motor power clip
+    # is |T| <= P/omega, so it always bites the FASTER wheel first — which in a
+    # corner is the OUTER wheel, the one a yaw split just gave more torque to.
+    # Clipping each wheel independently after a difference-preserving shift
+    # shrinks the split and can INVERT it. Check the axle difference keeps its
+    # sign through the whole chain at a speed where the clip is active.
+    w_fast = (100.0, 140.0, 100.0, 140.0)
+    T_req4 = (200.0, 300.0, 200.0, 300.0)      # outer wheel asked for more
+    T_out, _ = alloc._apply_limits4(T_req4, w_fast, 32.0)
+    d_in = T_req4[1] - T_req4[0]
+    d_out_f = T_out[1] - T_out[0]
+    d_out_r = T_out[3] - T_out[2]
+    check("F14", "per-motor power clip cannot invert an axle's torque split",
+          d_out_f > 0.0 and d_out_r > 0.0,
+          f"requested ΔT {d_in:+.0f} → delivered {d_out_f:+.1f} front / "
+          f"{d_out_r:+.1f} rear at ω = 100/140 rad/s (a naive per-wheel clip "
+          f"gives −30.1 here — sign inverted)")
+
+    # F15: every hard limit is respected simultaneously.
+    ok_T = all(-T_max - 1e-6 <= t <= T_max + 1e-6 for t in T_out)
+    ok_P = all(abs(t * w) <= vp.motor_P_peak + 1e-6
+               for t, w in zip(T_out, w_fast))
+    ok_tot = sum(t * w for t, w in zip(T_out, w_fast)) <= vp.P_total_max + 1e-6
+    check("F15", "four-wheel limits: per-wheel torque, per-motor power, total cap",
+          ok_T and ok_P and ok_tot,
+          f"peak |T| {max(abs(t) for t in T_out):.1f} ≤ {T_max:.0f} N·m; peak "
+          f"per-motor {max(abs(t * w) for t, w in zip(T_out, w_fast)) / 1e3:.1f} ≤ "
+          f"{vp.motor_P_peak / 1e3:.0f} kW; total "
+          f"{sum(t * w for t, w in zip(T_out, w_fast)) / 1e3:.1f} ≤ "
+          f"{vp.P_total_max / 1e3:.0f} kW")
+
+    # F16: the 80 kW rules cap is STRUCTURALLY unreachable, and saying so is
+    # more useful than a check that cannot fail.
+    head = vp.driven_wheels * vp.motor_P_peak - vp.P_total_max
+    info("F16", "the total power cap has zero headroom and cannot fire",
+         f"driven_wheels × motor_power_peak = "
+         f"{vp.driven_wheels * vp.motor_P_peak / 1e3:.0f} kW vs a "
+         f"{vp.P_total_max / 1e3:.0f} kW cap — headroom {head / 1e3:.0f} kW. The "
+         "per-motor clip already implies the total, so the rules branch is dead "
+         "code at these numbers. It stays because motor_power_peak is a DERIVED "
+         "estimate (kit curves scaled to 380 V, three methods spanning "
+         "18.1–20.3 kW) — a dyno above 20 kW makes the cap live.")
+
+    # F17: the axle split follows the estimated load split, and that estimate
+    # tracks the plant's own wheel_loads() including the AERO term.
+    model = VehicleModel(vp, MagicFormulaTire(tp_f), MagicFormulaTire(tp_r))
+    worst = 0.0
+    for vx in (5.0, 15.0, 25.0):
+        for ax in (-5.0, 0.0, 5.0, 10.0):
+            Fz = model.wheel_loads(vx, ax, 0.0)
+            want = (Fz[0] + Fz[1]) / sum(Fz)
+            worst = max(worst, abs(axle_load_fraction(vp, vx, ax) - want))
+    check("F17", "allocator's load estimate matches the plant's wheel_loads",
+          worst < 1e-12,
+          f"worst front-share error {worst:.1e} over vx = 5…25 m/s, "
+          "ax = −5…10 m/s² (aero included — dropping it costs 3.3 points at 1.2 g)")
 
 
 # ═══════════════════════ G. in-run invariant audit (standard maneuvers)
@@ -507,6 +755,10 @@ class AuditModel(VehicleModel):
 
     def __init__(self, *a, **k):
         super().__init__(*a, **k)
+        # the front tire's own peak-force slip at its static load — G8's
+        # reference, computed from the tire model so it moves when the fit does
+        self.k_peak_front = float(self.tires[0].kappa_at_peak(
+            self.p.m_total * G * self.p.weight_frac_front / 2.0))
         self.reset_audit()
 
     def reset_audit(self):
@@ -516,9 +768,11 @@ class AuditModel(VehicleModel):
         self.max_w = 0.0
         self.max_kappa = 0.0
         self.load_id_err = 0.0
+        self.airborne_driven = 0
+        self.min_vcx = float("inf")
 
-    def derivatives(self, s, delta, T_RL, T_RR):
-        ds, inf_ = super().derivatives(s, delta, T_RL, T_RR)
+    def derivatives(self, s, delta, T_wheel):
+        ds, inf_ = super().derivatives(s, delta, T_wheel)
         Fz = inf_["Fz"]
         self.min_Fz = min(self.min_Fz, min(Fz))
         if min(Fz) > 0.0:
@@ -533,9 +787,13 @@ class AuditModel(VehicleModel):
                 inf_["Fy_w"][i] / (t.mu(Fz[i]) * Fz[i])))
             if t.mu(Fz[i]) <= 0.5 * t.p.mu0 + 1e-12:
                 self.mu_floor_hits += 1
-        self.max_w = max(self.max_w, abs(s[IWRL]), abs(s[IWRR]))
-        self.max_kappa = max(self.max_kappa, abs(inf_["kappa"][2]),
-                             abs(inf_["kappa"][3]))
+        self.max_w = max([self.max_w] + [abs(s[j]) for j in IW])
+        self.max_kappa = max([self.max_kappa] + [abs(k) for k in inf_["kappa"]])
+        for i in range(4):
+            if Fz[i] <= 0.0 and abs(T_wheel[i]) > 1e-9:
+                self.airborne_driven += 1
+        self.min_vcx = min([self.min_vcx]
+                           + [abs(v) for v in contact_speeds(self, s, delta)])
         return ds, inf_
 
 
@@ -545,7 +803,7 @@ def section_g():
     Tmax = vp.T_wheel_max
 
     for man in (step_steer(), corner_exit(), slalom()):
-        for ci in (0, 1):                       # open & s-diff
+        for ci in (0, 1, 2):                    # every shipped config
             audit.reset_audit()
             ctrl = make_configs(vp, tp_f, tp_r, cp)[ci]
             log = simulate(audit, ctrl, man, dt=2.5e-4)
@@ -554,16 +812,29 @@ def section_g():
                   audit.load_id_err < 1e-9, f"worst {audit.load_id_err:.1e}")
             check("G2", f"{nm}: friction circle respected throughout",
                   audit.max_util <= 1.0 + 1e-9, f"peak util {audit.max_util:.3f}")
+            peak_T = max(np.abs(log["T_" + w]).max() for w in WHEEL_NAMES)
             check("G3", f"{nm}: torque commands inside ±T_wheel_max",
-                  np.abs(log["T_RL"]).max() <= Tmax + 1e-6 and
-                  np.abs(log["T_RR"]).max() <= Tmax + 1e-6,
-                  f"peak |T| {max(np.abs(log['T_RL']).max(), np.abs(log['T_RR']).max()):.0f} N·m")
+                  peak_T <= Tmax + 1e-6, f"peak |T| {peak_T:.0f} N·m (worst of 4)")
             check("G4", f"{nm}: total power under the 80 kW cap",
                   log["P_total"].max() <= vp.P_total_max * 1.001,
                   f"peak {log['P_total'].max() / 1e3:.1f} kW")
             mot_rpm = audit.max_w * vp.gear_ratio / (math.pi / 30)
             check("G5", f"{nm}: motor speed under 20 krpm",
                   mot_rpm < 20000, f"peak {mot_rpm:.0f} rpm")
+            # G8: the fronts must not run away. Their peak-force slip is
+            # kappa_at_peak at the front static load; twice that is deep on the
+            # falling side of the curve, where more wheel speed buys LESS force.
+            k_f = max(np.abs(log["kFL"]).max(), np.abs(log["kFR"]).max())
+            check("G8", f"{nm}: front slip stays off the falling side",
+                  k_f < 2.0 * audit.k_peak_front,
+                  f"peak front |κ| {k_f:.4f} vs tire peak "
+                  f"{audit.k_peak_front:.4f}")
+            # G9: nothing may spin up while its tire is off the ground — a
+            # lifted wheel makes no reaction force, so dω/dt = T/I unopposed.
+            check("G9", f"{nm}: no wheel driven while airborne",
+                  audit.airborne_driven == 0,
+                  f"{audit.airborne_driven} evaluations with Fz = 0 and "
+                  "torque still commanded")
             if (man.slug, ci) == ("corner_exit", 0):
                 info("G6", f"{nm}: closest approach to wheel lift",
                      f"min Fz = {audit.min_Fz:.0f} N (0 = airborne wheel)")
@@ -581,46 +852,28 @@ def section_g():
     i0 = int(0.8 * len(log["t"]))
     dw_act = (log["wRR"] - log["wRL"])[i0:].mean()
     dw_kin = (log["r"][i0:] * vp.track_r / vp.r_wheel).mean()
-    check("G7", "open-diff wheels settle to the kinematic Δω by themselves",
+    check("G7", "open-diff REAR wheels settle to the kinematic Δω by themselves",
           abs(dw_act - dw_kin) / abs(dw_kin) < 0.25,
           f"actual {dw_act:.3f} vs kinematic {dw_kin:.3f} rad/s (gap = real "
           "slip-ratio difference from the torque split, not an error)")
+    # the FRONT axle's target carries a cos(delta): both front wheels share
+    # x = a, so the sin(delta) terms cancel in the difference. This is the
+    # stronger of the two — it exercises the steered projection, which the rear
+    # axle never touches.
+    dwf_act = (log["wFR"] - log["wFL"])[i0:].mean()
+    dwf_kin = (log["r"][i0:] * vp.track_f * np.cos(log["delta"][i0:])
+               / vp.r_wheel).mean()
+    check("G7", "open-diff FRONT wheels settle to r·track_f·cos δ / r_w",
+          abs(dwf_act - dwf_kin) / abs(dwf_kin) < 0.25,
+          f"actual {dwf_act:.3f} vs kinematic {dwf_kin:.3f} rad/s "
+          f"(cos δ correction {100 * (1 - np.cos(log['delta'][i0:]).mean()):.2f}%)")
+    info("G7", "closest approach to the low-speed slip guard",
+         f"min |v_cx| over the run = {audit.min_vcx:.2f} m/s against "
+         f"v_eps = {vp.v_eps:.2f} — below that the slip-ratio denominator is "
+         "floored and the wheel-spin states stiffen sharply")
 
 
 # ═══════════════════ H. controller at a realistic VCU rate
-def simulate_ctrl_rate(model, controller, maneuver, dt, ctrl_every):
-    """sim.simulate, but the controller only runs every `ctrl_every` physics
-    steps (zero-order hold in between) — a VCU at its real update rate."""
-    p = model.p
-    controller.reset()
-    n = int(round(maneuver.duration / dt))
-    s = [0.0] * NSTATES
-    s[IVX] = maneuver.vx0
-    s[IWRL] = s[IWRR] = maneuver.vx0 / p.r_wheel
-    log = {k: [] for k in ("t", "r", "dw_target", "wRL", "wRR",
-                           "kRL", "kRR", "beta", "vx")}
-    T_RL = T_RR = 0.0
-    dbg = None
-    for k in range(n):
-        t = k * dt
-        delta, T_req = maneuver.inputs(t)
-        if k % ctrl_every == 0:
-            dbg = controller.update(s, delta, T_req, dt * ctrl_every)
-            T_RL, T_RR = dbg.T_RL, dbg.T_RR
-        k1, inf_ = model.derivatives(s, delta, T_RL, T_RR)
-        if k % 4 == 0:
-            log["t"].append(t)
-            log["r"].append(s[IR]); log["vx"].append(s[IVX])
-            log["dw_target"].append(dbg.dw_target)
-            log["wRL"].append(s[IWRL]); log["wRR"].append(s[IWRR])
-            log["kRL"].append(inf_["kappa"][2]); log["kRR"].append(inf_["kappa"][3])
-            log["beta"].append(math.atan2(s[IVY], max(s[IVX], 0.5)))
-        s = rk4_step(model, s, delta, T_RL, T_RR, dt, k1=k1)
-        if abs(s[IR]) > 8.0 or abs(s[IVY]) > 15.0:
-            break
-    return {k: np.asarray(v) for k, v in log.items()}
-
-
 def section_h():
     vp, tp_f, tp_r, cp = default_setup()
     model = VehicleModel(vp, MagicFormulaTire(tp_f), MagicFormulaTire(tp_r))
@@ -628,7 +881,7 @@ def section_h():
     rows = []
     for hz, every in (("4 kHz (as simulated)", 1), ("1 kHz", 4), ("100 Hz", 40)):
         ctrl = make_configs(vp, tp_f, tp_r, cp)[1]
-        log = simulate_ctrl_rate(model, ctrl, man, 2.5e-4, every)
+        log = simulate(model, ctrl, man, dt=2.5e-4, ctrl_every=every)
         dw_rmse = float(np.sqrt(np.mean(
             (log["dw_target"] - (log["wRR"] - log["wRL"])) ** 2)))
         finished = log["t"][-1] >= man.duration - 0.01
@@ -638,6 +891,28 @@ def section_h():
         info("H1", f"s-diff at {hz}",
              f"Δω RMSE {dr:.4f} ({(dr / base[1] - 1) * 100:+.0f}%)"
              + ("" if fin else "  ← SPUN"))
+    # The power cap is applied by the CONTROLLER, at the controller's rate, to
+    # the wheel speeds it last saw. Between updates the torque is held while
+    # the wheels accelerate, so delivered power overshoots the commanded cap.
+    # Rules-relevant: EV.4.2 is measured continuously at the accumulator, so a
+    # real VCU needs margin BELOW the cap, not a command exactly at it.
+    from model.maneuvers.tracks import track_maneuvers, model_for
+    trk = track_maneuvers(vp, types=["90deg"])[1]      # the one that reaches it
+    peaks = []
+    for hz, every in (("4 kHz", 1), ("100 Hz", 40)):
+        lg = simulate(model_for(trk, model), make_configs(vp, tp_f, tp_r, cp)[0],
+                      trk, dt=2.5e-4, ctrl_every=every)
+        peaks.append((hz, lg["P_total"].max()))
+    info("H2", "the power cap is enforced at the VCU rate, not continuously",
+         ", ".join(f"{hz} peaks at {p / 1e3:.3f} kW "
+                   f"({100 * (p / vp.P_total_max - 1):+.3f}%)"
+                   for hz, p in peaks)
+         + f" against the {vp.P_total_max / 1e3:.0f} kW cap, on a full-throttle "
+         "apex step. The controller caps the power it COMMANDS, using the wheel "
+         "speeds it last saw; the torque is then held for 10 ms while the wheels "
+         "speed up. EV.4.2 is measured continuously at the accumulator, so a "
+         "real VCU needs margin below the cap, not a command sitting on it.")
+
     degraded = rows[2][1] > 3.0 * base[1] or not rows[2][2]
     check("H1", "gains survive a realistic 100 Hz VCU rate without instability",
           rows[2][2],
@@ -672,13 +947,15 @@ def section_i():
     sen = SensorSuite(vp, noise=False)
     s = [0.0] * NSTATES
     s[IVX] = 15.0
-    s[IWRL], s[IWRR] = 60.0, 70.0
+    for j, w0 in zip(IW, (40.0, 50.0, 60.0, 70.0)):
+        s[j] = w0
     from model.sensors import DriverInputs
     sr = sen.measure(s, DriverInputs(), {"ax": 0, "ay": 0}, 0.01, False)
-    check("I2", "WSS: motor rpm → wheel speed chain exact (quantization off)",
-          abs(sr.wheel_speed_RL - 60.0) < 1e-12 and
-          abs(sr.wheel_speed_RR - 70.0) < 1e-12,
-          f"RL {sr.wheel_speed_RL:.6f}, RR {sr.wheel_speed_RR:.6f} rad/s")
+    got = [getattr(sr, "wheel_speed_" + nm) for nm in WHEEL_NAMES]
+    want = [40.0, 50.0, 60.0, 70.0]
+    check("I2", "WSS: motor rpm → wheel speed chain exact on all four corners",
+          max(abs(g - w) for g, w in zip(got, want)) < 1e-12,
+          " ".join(f"{nm} {g:.4f}" for nm, g in zip(WHEEL_NAMES, got)) + " rad/s")
     lsb = cfg.sensors.wheel_speed.quant_rpm * (math.pi / 30) / vp.gear_ratio
     info("I2", "WSS quantization at the wheel",
          f"1 motor-rpm LSB = {lsb * vp.r_wheel * 1000:.1f} mm/s of ground speed "
@@ -731,6 +1008,38 @@ def section_i():
          f"dw RMSE {metrics(la, vp)['dw RMSE [rad/s]']:.4f} vs perfect "
          f"{yp:.4f} — noise + VCU rate + estimation all included")
 
+    # I7: the ground-speed estimate must beat the naive wheel-only pick, and
+    # must stay bounded through a traction event. With four driven wheels
+    # min(w)*r_w is no longer a lower bound on ground speed, so this is the
+    # check that catches a revert to it.
+    li = simulate(model, make_configs(vp, tp_f, tp_r, cp)[1], corner_exit(),
+                  sensors=SensorSuite(vp), ctrl_every=40)
+    err_est = float(np.abs(li["vx_est"] - li["vx"]).max())
+    wheel_only = np.minimum(li["wRL"], li["wRR"]) * vp.r_wheel
+    err_wss = float(np.abs(wheel_only - li["vx"]).max())
+    check("I7", "vx estimate is bounded and beats the wheel-only pick",
+          err_est < 1.0 and err_est < err_wss,
+          f"worst |vx_est − vx| = {err_est:.3f} m/s vs {err_wss:.3f} m/s for "
+          f"min(driven wheels)·r_w over corner_exit")
+
+    # I6: pedal map round trip. DriverAdapter turns the maneuver's requested
+    # torque into an APPS percentage and the controller turns it back; the two
+    # are exact inverses ONLY while both scale by the same driven-wheel count.
+    # If driver.py and the controller ever disagree (2 vs 4 motors), every
+    # sensor-vs-perfect-state comparison is silently confounded — this is the
+    # check that catches it.
+    adapter = DriverAdapter(vp)
+    worst = 0.0
+    for frac in np.linspace(0.0, 1.0, 21):
+        T_in = frac * vp.T_drive_max
+        apps = adapter.inputs(0.0, T_in).apps_pct
+        T_back = vp.T_drive_max * apps / 100.0     # the controller's pedal map
+        worst = max(worst, abs(T_back - T_in))
+    check("I6", "pedal map: driver adapter and controller are exact inverses",
+          worst < 1e-9,
+          f"worst round-trip error {worst:.1e} N·m over 0..{vp.T_drive_max:.0f} "
+          f"N·m ({vp.driven_wheels} driven wheels)")
+
 
 def main():
     print("FSAE-Sim physics verification — independent cross-checks")
@@ -740,7 +1049,8 @@ def main():
                      ("C. slip kinematics", section_c),
                      ("D. EOM & integration", section_d),
                      ("E. vs bicycle model", section_e),
-                     ("F. controller limits", section_f),
+                     ("F. controller limits (s-diff)", section_f),
+                     ("F2. four-corner allocator limits", section_f2),
                      ("G. in-run audit", section_g),
                      ("H. VCU-rate robustness", section_h),
                      ("I. sensor stack", section_i)):
