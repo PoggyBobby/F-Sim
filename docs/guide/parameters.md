@@ -15,31 +15,11 @@ Generated from the `params.yaml` files — regenerate with `.venv/bin/python par
 | `aero.cd_coeff` | `model/physical/aero/params.yaml` | FROM REPORT |
 | `aero.cl_coeff` | `model/physical/aero/params.yaml` | FROM REPORT |
 | `aero.frontal_area` | `model/physical/aero/params.yaml` | FROM REPORT |
-| `controllers.awd.ax_est_max` | `controllers/python/awd/params.yaml` | TUNED (sim) |
-| `controllers.awd.ay_est_max` | `controllers/python/awd/params.yaml` | NUMERICAL GUARD |
-| `controllers.awd.ay_ff_frac` | `controllers/python/awd/params.yaml` | TUNED (sim) |
-| `controllers.awd.frac_front_base` | `controllers/python/awd/params.yaml` | TUNED (sim) |
-| `controllers.awd.frac_front_max` | `controllers/python/awd/params.yaml` | TUNED (sim) |
-| `controllers.awd.frac_front_min` | `controllers/python/awd/params.yaml` | TUNED (sim) |
-| `controllers.awd.frac_rate` | `controllers/python/awd/params.yaml` | TUNED (sim) |
-| `controllers.awd.k_load` | `controllers/python/awd/params.yaml` | TUNED (sim) |
-| `controllers.awd.k_spin` | `controllers/python/awd/params.yaml` | TUNED (sim) |
-| `controllers.awd.kappa_lim` | `controllers/python/awd/params.yaml` | TUNED (sim) |
-| `controllers.awd.load_exponent` | `controllers/python/awd/params.yaml` | TUNED (sim) |
-| `controllers.awd.share_min` | `controllers/python/awd/params.yaml` | NUMERICAL GUARD |
-| `controllers.awd.spin_floor` | `controllers/python/awd/params.yaml` | TUNED (sim) |
-| `controllers.awd.spin_release_rate` | `controllers/python/awd/params.yaml` | TUNED (sim) |
-| `controllers.deadband` | `controllers/python/params.yaml` | CURRENT CAR |
-| `controllers.delta_max` | `controllers/python/params.yaml` | SUSPECT |
-| `controllers.f_min` | `controllers/python/params.yaml` | CURRENT CAR |
-| `controllers.k_derate` | `controllers/python/params.yaml` | CURRENT CAR |
-| `controllers.k_inner` | `controllers/python/params.yaml` | CURRENT CAR |
-| `controllers.rate` | `controllers/python/params.yaml` | CURRENT CAR |
-| `controllers.steering_ratio` | `controllers/python/params.yaml` | CURRENT CAR |
 | `drivetrain.I_wheel_front` | `model/physical/drivetrain/params.yaml` | DERIVED |
 | `drivetrain.I_wheel_rear` | `model/physical/drivetrain/params.yaml` | DERIVED |
 | `drivetrain.driven_wheels` | `model/physical/drivetrain/params.yaml` | CURRENT CAR |
 | `drivetrain.gear_ratio` | `model/physical/drivetrain/params.yaml` | FROM REPORT |
+| `drivetrain.max_motor_current` | `model/physical/drivetrain/params.yaml` | CURRENT CAR |
 | `drivetrain.motor_kt` | `model/physical/drivetrain/params.yaml` | PLACEHOLDER |
 | `drivetrain.motor_max_speed` | `model/physical/drivetrain/params.yaml` | CURRENT CAR |
 | `drivetrain.motor_power_peak` | `model/physical/drivetrain/params.yaml` | DERIVED |

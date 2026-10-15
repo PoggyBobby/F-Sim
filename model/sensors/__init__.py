@@ -11,7 +11,6 @@ Real VCU sensor set (team, 2026-08-31), one directory each:
                                 and the ax/ay accelerometer channels
     steering_angle/       SAS   handwheel angle → road-wheel estimate through
                                 the team's steering-chart map
-    gps/                        not modeled yet
     vcu/                        the VCU itself: loop rate, rules thresholds,
                                 noise seed
 

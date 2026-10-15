@@ -16,13 +16,22 @@ Sections
   D  rigid-body EOM    yaw moment sum, coast-down vs closed form, mirror
                        symmetry, steady-state force balance, RK4 dt-refine
   E  steady cornering  two-track sim vs independent linear bicycle model
-  F  controller limits torque caps, yaw-split preservation, regen floor,
-                       power caps — unit-tested against hand values
-  G  in-run audit      invariants recorded DURING the standard maneuvers:
-                       friction-circle utilization, wheel lift, mu floor,
-                       torque/power/speed limits, wheel-speed kinematics
-  H  robustness        controller at realistic VCU rates (100 Hz / 1 kHz)
-                       instead of the physics rate (4 kHz)
+  F  VCU firmware      the compiled firmware driven directly, cycle by
+                       cycle, against the #defines in its own sdiff.c: the
+                       open-diff build splits evenly, the s-diff build cuts
+                       the inner wheel by K_INNER, deadband, slew rate
+  G  in-run audit      invariants recorded DURING the standard maneuvers,
+                       with the firmware in the loop: friction-circle
+                       utilization, wheel lift, torque/power/speed limits,
+                       wheel-speed kinematics
+  I  sensor stack      steer map, WSS chain, determinism, vx estimate, and
+                       the pedal map round trip through the firmware
+
+Sections D and E drive the plant with EqualTorque, a fixture defined below
+that reads the true state — closed-form answers need exact, known torques,
+and the firmware can only be reached through the noisy, quantized sensor
+stack. It is test scaffolding, not a sim configuration. Sections F, G and I
+need the firmware built:  make -C sil
 
 Exit code 0 = every hard check passed. INFO lines are findings/quantified
 observations, not pass/fail.
@@ -33,16 +42,15 @@ import sys
 
 import numpy as np
 
-from model.params import VehicleParams, TireParams, ControlParams, default_setup, G, RHO_AIR
+from model.params import VehicleParams, TireParams, default_setup, G, RHO_AIR
 from model.physical.tires.tire import MagicFormulaTire
 from model.physical.vehicle import (VehicleModel, front_steer_angles, NSTATES, NWHEELS,
                                     IW, WHEEL_NAMES, free_rolling_omegas,
                                     wheel_steer_angles,
                                     contact_speeds, IX, IY, IPSI,
                      IVX, IVY, IR, IWRL, IWRR)
-from controllers.python.torque_split import TorqueSplitController
-from controllers.python.torque_allocator import (make_configs, FourCornerAllocator,
-                                                 axle_load_fraction, ax_feedforward)
+from sil.vcu_sil import (make_configs, ControllerDebug, VcuProcess,
+                         SIL_EXE, SIL_OPEN_EXE)
 from model.maneuvers.maneuvers import Maneuver, step_steer, corner_exit, slalom
 from model.sim import simulate, metrics
 
@@ -65,9 +73,33 @@ def info(section, name, detail):
     print(line)
 
 
+class EqualTorque:
+    """Physics fixture, not a sim configuration: the scripted request split
+    evenly over the driven wheels, read from the TRUE state. Sections D and E
+    use it to drive the plant with exact, known torques; their closed-form
+    answers cannot tolerate the sensor noise and quantization that sit between
+    the plant and the firmware."""
+    name = "equal-torque fixture"
+    plaus_cut = False
+
+    def __init__(self, vp):
+        self.vp = vp
+
+    def reset(self):
+        pass
+
+    def update(self, s, delta, T_req, dt):
+        n = self.vp.driven_wheels
+        each = T_req / n
+        T = (each, each, each, each) if n == 4 else (0.0, 0.0, each, each)
+        dbg = ControllerDebug(T=T)
+        dbg.dw_target = s[IR] * self.vp.track_r / self.vp.r_wheel
+        return dbg
+
+
 # ═══════════════════════════════════════════════════════ A. tire model
 def section_a():
-    vp, tp_f, tp_r, cp = default_setup()
+    vp, tp_f, tp_r = default_setup()
     tire = MagicFormulaTire(tp_r)
 
     # A1: small-slip stiffness. The MF construction B = c/(C*mu) claims the
@@ -165,7 +197,7 @@ def section_a():
 
 # ═══════════════════════════════════════════════ B. vertical loads
 def section_b():
-    vp, tp_f, tp_r, cp = default_setup()
+    vp, tp_f, tp_r = default_setup()
     model = VehicleModel(vp, MagicFormulaTire(tp_f), MagicFormulaTire(tp_r))
 
     # B1: identity — for ANY (vx, ax, ay) the four loads must sum to
@@ -252,7 +284,7 @@ def section_b():
 
 # ═══════════════════════════════════════ C. slip kinematics
 def section_c():
-    vp, tp_f, tp_r, cp = default_setup()
+    vp, tp_f, tp_r = default_setup()
     model = VehicleModel(vp, MagicFormulaTire(tp_f), MagicFormulaTire(tp_r))
 
     # C1: slip angles vs the independent textbook small-angle formulas
@@ -433,14 +465,14 @@ def section_c():
 
 # ═══════════════════════════════════ D. rigid-body EOM & integration
 def section_d():
-    vp, tp_f, tp_r, cp = default_setup()
+    vp, tp_f, tp_r = default_setup()
     model = VehicleModel(vp, MagicFormulaTire(tp_f), MagicFormulaTire(tp_r))
 
     # D1: coast-down. δ=0, T=0 → only drag decelerates. Closed form for
     # dv/dt = −k·v²/m_eff with m_eff = m + 2·(I_wf + I_wr)/r_w² — ALL FOUR
     # wheels store rotational KE now that the fronts have a spin state.
     coast = Maneuver("coast", "coast", 3.0, 15.0, lambda t: (0.0, 0.0))
-    ctrl = make_configs(vp, tp_f, tp_r, cp)[0]
+    ctrl = EqualTorque(vp)
     log = simulate(model, ctrl, coast, dt=2.5e-4)
     k = 0.5 * RHO_AIR * vp.CdA
     m_eff = vp.m_total + 2 * (vp.I_wheel_f + vp.I_wheel_r) / vp.r_wheel ** 2
@@ -476,8 +508,8 @@ def section_d():
     # the exactly mirrored trajectory — catches ANY left/right sign error.
     man_l = step_steer(delta_deg=+5.0)
     man_r = step_steer(delta_deg=-5.0)
-    ctrl_l = make_configs(vp, tp_f, tp_r, cp)[1]    # s-diff
-    ctrl_r = make_configs(vp, tp_f, tp_r, cp)[1]
+    ctrl_l = EqualTorque(vp)
+    ctrl_r = EqualTorque(vp)
     log_l = simulate(model, ctrl_l, man_l, dt=2.5e-4)
     log_r = simulate(model, ctrl_r, man_r, dt=2.5e-4)
     errs = {
@@ -486,7 +518,7 @@ def section_d():
         "beta": np.abs(log_l["beta"] + log_r["beta"]).max(),
         "T_RL vs T_RR": np.abs(log_l["T_RL"] - log_r["T_RR"]).max(),
     }
-    check("D2", "mirrored steer gives exactly mirrored car (all controllers on)",
+    check("D2", "mirrored steer gives exactly mirrored car",
           max(errs.values()) < 1e-9,
           "max asymmetry " + ", ".join(f"{k} {v:.1e}" for k, v in errs.items()))
 
@@ -506,7 +538,7 @@ def section_d():
     man = corner_exit()
     outs = []
     for dt in (2.5e-4, 1.25e-4, 6.25e-5):
-        c = make_configs(vp, tp_f, tp_r, cp)[1]
+        c = EqualTorque(vp)
         lg = simulate(model, c, man, dt=dt, log_every=max(1, int(1e-3 / dt)))
         outs.append((lg["r"][-1], lg["X"][-1], lg["Y"][-1],
                      metrics(lg, vp)["dw RMSE [rad/s]"]))
@@ -527,7 +559,6 @@ def section_e():
     vp = VehicleParams(ClA=0.0, CdA=0.0)
     tp_f = TireParams(c_alpha=15.0)
     tp_r = TireParams(c_alpha=16.0)
-    cp = ControlParams()
     model = VehicleModel(vp, MagicFormulaTire(tp_f), MagicFormulaTire(tp_r))
 
     m, L = vp.m_total, vp.wheelbase
@@ -543,7 +574,7 @@ def section_e():
         d = math.radians(ddeg)
         man = Maneuver("ss", "ss", 6.0, vx0,
                        lambda t, d=d: (d if t > 0.5 else 0.0, 0.0))
-        ctrl = make_configs(vp, tp_f, tp_r, cp)[0]      # open — no controller
+        ctrl = EqualTorque(vp)
         log = simulate(model, ctrl, man, dt=2.5e-4)
         i0 = int(0.9 * len(log["t"]))
         r_sim = log["r"][i0:].mean()
@@ -557,196 +588,98 @@ def section_e():
               f"({(r_sim / r_bike - 1) * 100:+.1f}%)")
 
 
-# ═══════════════════════════════════ F. controller limit unit tests
+# ═══════════════════════════════════ F. the VCU firmware against its own source
+def _firmware_defines():
+    """The #defines the binaries were compiled from — read from the PATCHED
+    copy in sil/build/src, so the checks below test the code that actually
+    ran, against numbers nobody retyped."""
+    import os, re
+    src = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                       "sil", "build", "src")
+    want = ("STEERING_RATIO", "DELTA_MAX", "K_DERATE", "K_INNER", "F_MIN",
+            "DEADBAND", "RATE", "SDIFF_LOOP_PERIOD", "MAX_MOTOR_CURRENT_MA")
+    found = {}
+    for fn in ("sdiff.c", "powertrainControl.h"):
+        with open(os.path.join(src, fn)) as fh:
+            for line in fh:
+                m = re.match(r"\s*#define\s+(\w+)\s+([-+0-9.eE]+)f?\b", line)
+                if m and m.group(1) in want:
+                    found[m.group(1)] = float(m.group(2))
+    missing = [k for k in want if k not in found]
+    if missing:
+        raise RuntimeError(f"firmware no longer defines {missing} — update "
+                           "verify.py section F")
+    return found
+
+
+def _drive(exe, handwheel_deg, n, apps=50.0, vx=10.0):
+    """Boot a fresh firmware process and feed it n identical VCU cycles.
+    Returns [(cmd_RL, cmd_RR), ...] in mA, one per cycle."""
+    vp = VehicleParams()
+    rpm = vx / vp.r_wheel * vp.gear_ratio * 30.0 / math.pi
+    vcu = VcuProcess(exe)
+    vcu.start()
+    out, t = [], 0.0
+    for _ in range(n):
+        t += 0.01
+        _, _, rl, rr = vcu.exchange(t, apps, 0.0, handwheel_deg, rpm, rpm,
+                                    0.0, 0.0, 0.0)
+        out.append((rl, rr))
+    vcu.stop()
+    return out
+
+
 def section_f():
-    vp, tp_f, tp_r, cp = default_setup()
-    # index 2 is the rear-drive s-diff reference: F8-F11 test the sdiff.c LAW,
-    # not the four-corner allocator, so they must hold onto that controller.
-    ctrl = make_configs(vp, tp_f, tp_r, cp)[2]
-    Tmax = vp.T_wheel_max
+    import os
+    if not (os.path.exists(SIL_EXE) and os.path.exists(SIL_OPEN_EXE)):
+        check("F0", "firmware binaries built", False,
+              "run  make -C sil  first")
+        return
+    d = _firmware_defines()
+    ratio = d["STEERING_RATIO"]
+    lock_hw = 3.0 * d["DELTA_MAX"] * ratio      # road wheel well past DELTA_MAX
+    db_hw = 0.5 * d["DEADBAND"] * ratio          # road wheel inside DEADBAND
+    f_exp = max(1.0 - d["K_DERATE"], d["F_MIN"])
+    g_in = 1.0 - d["K_INNER"]
+    base = 0.5 * d["MAX_MOTOR_CURRENT_MA"]      # 50% pedal
+    settle = int(round(d["K_INNER"] / (d["RATE"] * d["SDIFF_LOOP_PERIOD"])))
+    N = settle + 60
+    info("F", "firmware constants (read from sdiff.c / powertrainControl.h)",
+         ", ".join(f"{k} {v:g}" for k, v in d.items()))
 
-    # F1: no limits active — pure split.
-    TL, TR = ctrl._apply_limits(100.0, 60.0, 15.0, 65.0, 65.0)
-    check("F1", "unsaturated split: base±dT/2 exactly",
-          abs(TL - 70) < 1e-12 and abs(TR - 130) < 1e-12, f"{TL:.0f}/{TR:.0f} N·m")
+    # F1: the open-diff build — the s-diff switch off — must send the two
+    # rear motors the SAME command at full lock, equal to the pedal map.
+    rl, rr = _drive(SIL_OPEN_EXE, +lock_hw, N)[-1]
+    check("F1", "open-diff firmware: equal commands at full lock",
+          rl == rr and abs(rl / base - 1) < 0.02,
+          f"RL {rl} mA, RR {rr} mA at 50% pedal (pedal map {base:.0f} mA)")
 
-    # F2: upper clip — the yaw split must survive, thrust must give way.
-    TL, TR = ctrl._apply_limits(250.0, 100.0, 15.0, 65.0, 65.0)
-    check("F2", "upper torque clip preserves ΔT (thrust sacrificed)",
-          abs((TR - TL) - 100.0) < 1e-9 and TR <= Tmax + 1e-9,
-          f"{TL:.1f}/{TR:.1f}, ΔT = {TR - TL:.1f} N·m, cap {Tmax:.0f}")
+    # F2/F3: the s-diff build at full left / right lock. Inner = K_INNER cut,
+    # outer = the shared budget only (f, which K_DERATE = 0 pins at 1).
+    rl, rr = _drive(SIL_EXE, +lock_hw, N)[-1]
+    check("F2", "s-diff firmware, LEFT lock: inner RL = (1 − K_INNER)·outer",
+          abs(rl / rr - g_in) < 0.005 and abs(rr / (f_exp * base) - 1) < 0.02,
+          f"RL/RR {rl / rr:.4f} vs {g_in:.4f}; RR {rr} mA vs {f_exp * base:.0f}")
+    rl2, rr2 = _drive(SIL_EXE, -lock_hw, N)[-1]
+    check("F3", "s-diff firmware, RIGHT lock: mirror of F2",
+          rl2 == rr and rr2 == rl,
+          f"left lock RL/RR {rl}/{rr} mA, right lock {rl2}/{rr2} mA")
 
-    # F3: regen floor below the cutoff speed — no negative torque at all.
-    TL, TR = ctrl._apply_limits(5.0, -80.0, 1.0, 5.0, 5.0)
-    check("F3", "below regen cutoff no wheel torque is negative",
-          TL >= -1e-9 and TR >= -1e-9, f"{TL:.1f}/{TR:.1f} N·m at vx=1.0")
-    info("F3", "base-shift direction at the floor",
-         f"request was base 5, ΔT −80 → delivered {TL:.0f}/{TR:.0f}: the shift "
-         f"ADDS {TL + TR - 10:.0f} N·m of thrust the driver didn't ask for to "
-         "protect the yaw split — policy says sacrifice thrust, but at the "
-         "LOWER bound it manufactures thrust instead (finding #2)")
+    # F4: inside the deadband there is no left/right split.
+    rl, rr = _drive(SIL_EXE, +db_hw, N)[-1]
+    check("F4", "s-diff firmware inside DEADBAND: equal sides",
+          rl == rr,
+          f"RL {rl} mA, RR {rr} mA at {db_hw / ratio:.2f}° road wheel")
 
-    # F4: an absurd ΔT request gets clipped into the physical range.
-    TL, TR = ctrl._apply_limits(0.0, 5000.0, 15.0, 65.0, 65.0)
-    check("F4", "ΔT request clipped to physical torque range",
-          TR <= Tmax + 1e-9 and TL >= -Tmax - 1e-9 and TR - TL <= 2 * Tmax + 1e-9,
-          f"{TL:.0f}/{TR:.0f} N·m")
-
-    # F5: per-motor power cap at high wheel speed.
-    w = 140.0                                    # rad/s ≈ 32 m/s ground speed
-    TL, TR = ctrl._apply_limits(250.0, 0.0, 32.0, w, w)
-    check("F5", "per-motor power cap enforced",
-          TL * w <= vp.motor_P_peak + 1e-6,
-          f"P = {TL * w / 1e3:.1f} kW vs cap {vp.motor_P_peak / 1e3:.0f} kW")
-
-    # F6: 80 kW total cap.
-    TL, TR = ctrl._apply_limits(220.0, 0.0, 34.0, 150.0, 150.0)
-    P = TL * 150 + TR * 150
-    check("F6", "80 kW total cap enforced", P <= vp.P_total_max + 1e-6,
-          f"P_total = {P / 1e3:.1f} kW")
-
-    # F7: power clamps CAN break the preserved yaw split — quantify.
-    TL, TR = ctrl._apply_limits(200.0, 120.0, 32.0, 140.0, 140.0)
-    info("F7", "yaw split vs power caps",
-         f"requested ΔT 120 → delivered {TR - TL:.1f} N·m at 32 m/s: the "
-         "per-motor/total power clamps clip each side independently, quietly "
-         "shrinking yaw authority at high speed (finding #3). Real motors do "
-         "this too — but the sim should REPORT it, not hide it")
-
-    # F8: open-loop s-diff mirrors sdiff.c. Settled multipliers at full
-    # LEFT lock, computed by hand from the YAML constants:
-    #   f = 1 - k_derate (floored at f_min),  g_in = 1 - k_inner,  g_out = 1
-    #   RL (inner) = T_base*f*g_in,  RR (outer) = T_base*f
-    s = [0.0] * NSTATES
-    s[IVX] = 10.0
-    for j in IW:
-        s[j] = 10.0 / vp.r_wheel
-    ctrl.reset()
-    for _ in range(200):                     # 2 s at 10 ms — slew fully settled
-        d = ctrl.update(s, +cp.delta_max, 200.0, 0.01)
-    f_exp = max(1.0 - cp.k_derate, cp.f_min)
-    RL_exp = 100.0 * f_exp * (1.0 - cp.k_inner)
-    RR_exp = 100.0 * f_exp
-    check("F8", "s-diff full LEFT lock: inner=RL derated, outer=RR budget only",
-          abs(d.T_RL - RL_exp) < 1e-9 and abs(d.T_RR - RR_exp) < 1e-9,
-          f"RL {d.T_RL:.2f} / RR {d.T_RR:.2f} vs expected {RL_exp:.2f} / {RR_exp:.2f} N·m")
-
-    # F9: mirror — full RIGHT lock swaps the sides exactly.
-    ctrl.reset()
-    for _ in range(200):
-        d = ctrl.update(s, -cp.delta_max, 200.0, 0.01)
-    check("F9", "s-diff full RIGHT lock: mirror of F8",
-          abs(d.T_RR - RL_exp) < 1e-9 and abs(d.T_RL - RR_exp) < 1e-9,
-          f"RL {d.T_RL:.2f} / RR {d.T_RR:.2f}")
-
-    # F10: inside the deadband there is NO inner/outer split — but the
-    # friction budget f still applies (sdiff.c gates only g_left/g_right on
-    # DEADBAND, not f). Both sides equal, both = T_base * f.
-    ctrl.reset()
-    for _ in range(200):
-        d = ctrl.update(s, 0.5 * cp.deadband, 200.0, 0.01)
-    # (with k_derate = 0 the budget term is inert and f_db is exactly 1.0 —
-    # what F10 still proves is that the two sides stay equal.)
-    f_db = max(1.0 - cp.k_derate * (0.5 * cp.deadband / cp.delta_max), cp.f_min)
-    check("F10", "s-diff inside deadband: equal sides, budget-only derate",
-          abs(d.T_RL - d.T_RR) < 1e-12 and abs(d.T_RL - 100.0 * f_db) < 1e-9,
-          f"RL {d.T_RL:.2f} / RR {d.T_RR:.2f} (f = {f_db:.4f}, no L/R split)")
-
-    # F11: slew actually limits — one 10 ms step from straight toward full
-    # lock may move a multiplier by at most rate*dt. Probed on g_left, the
-    # INNER multiplier: with k_derate = 0 (the current sdiff.c) f's target is
-    # 1.0, so f never leaves its 1.0 start and cannot exercise the slew.
-    ctrl.reset()
-    d = ctrl.update(s, +cp.delta_max, 200.0, 0.01)
-    check("F11", "s-diff slew: one step moves g_left by <= rate*dt",
-          abs(d.g_left_appl - (1.0 - cp.rate * 0.01)) < 1e-9,
-          f"g_left after one step {d.g_left_appl:.4f} "
-          f"(limit {1.0 - cp.rate * 0.01:.4f})")
-
-
-def section_f2():
-    """The four-corner allocator's limit chain — F12..F16."""
-    vp, tp_f, tp_r, cp = default_setup()
-    T_max = vp.T_wheel_max
-    alloc = make_configs(vp, tp_f, tp_r, cp)[1]
-    openc = make_configs(vp, tp_f, tp_r, cp)[0]
-    s = [0.0] * NSTATES
-    s[IVX] = 15.0
-    for j in IW:
-        s[j] = 15.0 / vp.r_wheel
-
-    # F12: with the law switched off the allocator IS an open differential —
-    # exactly T_req/4 at every corner. This is why the baseline config shares
-    # this code path instead of being a separate class.
-    d = openc.update(s, 0.1, 400.0, 0.01)
-    check("F12", "law off → exact even four-way split (an open diff)",
-          all(abs(t - 100.0) < 1e-12 for t in d.T),
-          " / ".join(f"{t:.6f}" for t in d.T) + " N·m for a 400 N·m request")
-
-    # F13: unsaturated, the allocation is conserved — nothing is invented or
-    # lost between the request and the four commands.
-    d = alloc.update(s, 0.0, 400.0, 0.01)
-    check("F13", "unsaturated: the four commands sum to the request",
-          abs(sum(d.T) - 400.0) < 1e-9,
-          f"Σ T = {sum(d.T):.6f} vs 400 N·m requested, split "
-          f"{d.T_FL + d.T_FR:.1f} front / {d.T_RL + d.T_RR:.1f} rear")
-
-    # F14: THE invariant the limit chain exists for. The per-motor power clip
-    # is |T| <= P/omega, so it always bites the FASTER wheel first — which in a
-    # corner is the OUTER wheel, the one a yaw split just gave more torque to.
-    # Clipping each wheel independently after a difference-preserving shift
-    # shrinks the split and can INVERT it. Check the axle difference keeps its
-    # sign through the whole chain at a speed where the clip is active.
-    w_fast = (100.0, 140.0, 100.0, 140.0)
-    T_req4 = (200.0, 300.0, 200.0, 300.0)      # outer wheel asked for more
-    T_out, _ = alloc._apply_limits4(T_req4, w_fast, 32.0)
-    d_in = T_req4[1] - T_req4[0]
-    d_out_f = T_out[1] - T_out[0]
-    d_out_r = T_out[3] - T_out[2]
-    check("F14", "per-motor power clip cannot invert an axle's torque split",
-          d_out_f > 0.0 and d_out_r > 0.0,
-          f"requested ΔT {d_in:+.0f} → delivered {d_out_f:+.1f} front / "
-          f"{d_out_r:+.1f} rear at ω = 100/140 rad/s (a naive per-wheel clip "
-          f"gives −30.1 here — sign inverted)")
-
-    # F15: every hard limit is respected simultaneously.
-    ok_T = all(-T_max - 1e-6 <= t <= T_max + 1e-6 for t in T_out)
-    ok_P = all(abs(t * w) <= vp.motor_P_peak + 1e-6
-               for t, w in zip(T_out, w_fast))
-    ok_tot = sum(t * w for t, w in zip(T_out, w_fast)) <= vp.P_total_max + 1e-6
-    check("F15", "four-wheel limits: per-wheel torque, per-motor power, total cap",
-          ok_T and ok_P and ok_tot,
-          f"peak |T| {max(abs(t) for t in T_out):.1f} ≤ {T_max:.0f} N·m; peak "
-          f"per-motor {max(abs(t * w) for t, w in zip(T_out, w_fast)) / 1e3:.1f} ≤ "
-          f"{vp.motor_P_peak / 1e3:.0f} kW; total "
-          f"{sum(t * w for t, w in zip(T_out, w_fast)) / 1e3:.1f} ≤ "
-          f"{vp.P_total_max / 1e3:.0f} kW")
-
-    # F16: the 80 kW rules cap is STRUCTURALLY unreachable, and saying so is
-    # more useful than a check that cannot fail.
-    head = vp.driven_wheels * vp.motor_P_peak - vp.P_total_max
-    info("F16", "the total power cap has zero headroom and cannot fire",
-         f"driven_wheels × motor_power_peak = "
-         f"{vp.driven_wheels * vp.motor_P_peak / 1e3:.0f} kW vs a "
-         f"{vp.P_total_max / 1e3:.0f} kW cap — headroom {head / 1e3:.0f} kW. The "
-         "per-motor clip already implies the total, so the rules branch is dead "
-         "code at these numbers. It stays because motor_power_peak is a DERIVED "
-         "estimate (kit curves scaled to 380 V, three methods spanning "
-         "18.1–20.3 kW) — a dyno above 20 kW makes the cap live.")
-
-    # F17: the axle split follows the estimated load split, and that estimate
-    # tracks the plant's own wheel_loads() including the AERO term.
-    model = VehicleModel(vp, MagicFormulaTire(tp_f), MagicFormulaTire(tp_r))
-    worst = 0.0
-    for vx in (5.0, 15.0, 25.0):
-        for ax in (-5.0, 0.0, 5.0, 10.0):
-            Fz = model.wheel_loads(vx, ax, 0.0)
-            want = (Fz[0] + Fz[1]) / sum(Fz)
-            worst = max(worst, abs(axle_load_fraction(vp, vx, ax) - want))
-    check("F17", "allocator's load estimate matches the plant's wheel_loads",
-          worst < 1e-12,
-          f"worst front-share error {worst:.1e} over vx = 5…25 m/s, "
-          "ax = −5…10 m/s² (aero included — dropping it costs 3.3 points at 1.2 g)")
+    # F5: the slew. The inner multiplier may fall by RATE·SDIFF_LOOP_PERIOD per
+    # cycle, so the full K_INNER cut takes K_INNER / (RATE·period) cycles.
+    cmds = _drive(SIL_EXE, +lock_hw, N)
+    final = cmds[-1][0] / cmds[-1][1]
+    n_hit = next(k for k, (l, r) in enumerate(cmds, 1)
+                 if l / r <= final + 0.002)
+    check("F5", "s-diff firmware slew: full cut takes K_INNER/(RATE·period) cycles",
+          abs(n_hit - settle) <= 3,
+          f"{n_hit} cycles to settle vs {settle} predicted")
 
 
 # ═══════════════════════ G. in-run invariant audit (standard maneuvers)
@@ -798,15 +731,17 @@ class AuditModel(VehicleModel):
 
 
 def section_g():
-    vp, tp_f, tp_r, cp = default_setup()
+    from model.sensors import SensorSuite
+    vp, tp_f, tp_r = default_setup()
     audit = AuditModel(vp, MagicFormulaTire(tp_f), MagicFormulaTire(tp_r))
     Tmax = vp.T_wheel_max
 
     for man in (step_steer(), corner_exit(), slalom()):
-        for ci in (0, 1, 2):                    # every shipped config
+        for ci in (0, 1):                       # both configs, firmware in the loop
             audit.reset_audit()
-            ctrl = make_configs(vp, tp_f, tp_r, cp)[ci]
-            log = simulate(audit, ctrl, man, dt=2.5e-4)
+            ctrl = make_configs(vp)[ci]
+            log = simulate(audit, ctrl, man, dt=2.5e-4,
+                           sensors=SensorSuite(vp), ctrl_every=40)
             nm = f"{man.slug}/{ctrl.name}"
             check("G1", f"{nm}: load identity holds throughout",
                   audit.load_id_err < 1e-9, f"worst {audit.load_id_err:.1e}")
@@ -847,8 +782,9 @@ def section_g():
     # G7: wheel-speed kinematic consistency, end-to-end through the
     # integrator: in the steady part of the step steer the actual rear
     # wheel-speed difference must land near r·track/r_w on its own.
-    ctrl = make_configs(vp, tp_f, tp_r, cp)[0]       # OPEN — nobody forcing it
-    log = simulate(audit, ctrl, step_steer(), dt=2.5e-4)
+    ctrl = make_configs(vp)[0]                       # OPEN — nobody forcing it
+    log = simulate(audit, ctrl, step_steer(), dt=2.5e-4,
+                   sensors=SensorSuite(vp), ctrl_every=40)
     i0 = int(0.8 * len(log["t"]))
     dw_act = (log["wRR"] - log["wRL"])[i0:].mean()
     dw_kin = (log["r"][i0:] * vp.track_r / vp.r_wheel).mean()
@@ -873,63 +809,12 @@ def section_g():
          "floored and the wheel-spin states stiffen sharply")
 
 
-# ═══════════════════ H. controller at a realistic VCU rate
-def section_h():
-    vp, tp_f, tp_r, cp = default_setup()
-    model = VehicleModel(vp, MagicFormulaTire(tp_f), MagicFormulaTire(tp_r))
-    man = corner_exit()
-    rows = []
-    for hz, every in (("4 kHz (as simulated)", 1), ("1 kHz", 4), ("100 Hz", 40)):
-        ctrl = make_configs(vp, tp_f, tp_r, cp)[1]
-        log = simulate(model, ctrl, man, dt=2.5e-4, ctrl_every=every)
-        dw_rmse = float(np.sqrt(np.mean(
-            (log["dw_target"] - (log["wRR"] - log["wRL"])) ** 2)))
-        finished = log["t"][-1] >= man.duration - 0.01
-        rows.append((hz, dw_rmse, finished))
-    base = rows[0]
-    for hz, dr, fin in rows:
-        info("H1", f"s-diff at {hz}",
-             f"Δω RMSE {dr:.4f} ({(dr / base[1] - 1) * 100:+.0f}%)"
-             + ("" if fin else "  ← SPUN"))
-    # The power cap is applied by the CONTROLLER, at the controller's rate, to
-    # the wheel speeds it last saw. Between updates the torque is held while
-    # the wheels accelerate, so delivered power overshoots the commanded cap.
-    # Rules-relevant: EV.4.2 is measured continuously at the accumulator, so a
-    # real VCU needs margin BELOW the cap, not a command exactly at it.
-    from model.maneuvers.tracks import track_maneuvers, model_for
-    trk = track_maneuvers(vp, types=["90deg"])[1]      # the one that reaches it
-    peaks = []
-    for hz, every in (("4 kHz", 1), ("100 Hz", 40)):
-        lg = simulate(model_for(trk, model), make_configs(vp, tp_f, tp_r, cp)[0],
-                      trk, dt=2.5e-4, ctrl_every=every)
-        peaks.append((hz, lg["P_total"].max()))
-    info("H2", "the power cap is enforced at the VCU rate, not continuously",
-         ", ".join(f"{hz} peaks at {p / 1e3:.3f} kW "
-                   f"({100 * (p / vp.P_total_max - 1):+.3f}%)"
-                   for hz, p in peaks)
-         + f" against the {vp.P_total_max / 1e3:.0f} kW cap, on a full-throttle "
-         "apex step. The controller caps the power it COMMANDS, using the wheel "
-         "speeds it last saw; the torque is then held for 10 ms while the wheels "
-         "speed up. EV.4.2 is measured continuously at the accumulator, so a "
-         "real VCU needs margin below the cap, not a command sitting on it.")
-
-    degraded = rows[2][1] > 3.0 * base[1] or not rows[2][2]
-    check("H1", "gains survive a realistic 100 Hz VCU rate without instability",
-          rows[2][2],
-          "did not spin at 100 Hz" if rows[2][2] else "SPINS at 100 Hz — gains "
-          "are tuned to the unrealistic 4 kHz update rate")
-    if degraded and rows[2][2]:
-        info("H1", "degradation at 100 Hz",
-             "stable but markedly worse — retune gains at the real VCU rate "
-             "before quoting controller performance (finding #1)")
-
-
 # ═══════════════════════ I. sensor stack (sensors.py)
 def section_i():
     from model.config import cfg
     from model.sensors import (SensorSuite, DriverAdapter, steer_map_deg,
                          steer_map_inv_deg)
-    vp, tp_f, tp_r, cp = default_setup()
+    vp, tp_f, tp_r = default_setup()
 
     # I1: steering map — centered, odd, and the driver-adapter inverse is
     # an exact round trip over the full ±23° road-wheel range.
@@ -961,58 +846,25 @@ def section_i():
          f"1 motor-rpm LSB = {lsb * vp.r_wheel * 1000:.1f} mm/s of ground speed "
          "— the resolver-over-CAN path is effectively noise-free")
 
-    # I3: EV.4.7 plausibility latch — unit-tested against the rule text.
-    ctrl = make_configs(vp, tp_f, tp_r, cp)[0]
-    ctrl.reset()
-    from model.sensors import SensorReadings
-    def step(apps, bps):
-        sr = SensorReadings(apps_pct=apps, bps_bar=bps, vx_est=10.0)
-        sr.wheel_speed_RL = sr.wheel_speed_RR = 10.0 / vp.r_wheel
-        return ctrl.update_from_sensors(sr, 0.01)
-    d1 = step(60.0, 0.0)                    # drive
-    d2 = step(60.0, 20.0)                   # illegal overlap → cut
-    d3 = step(15.0, 0.0)                    # released but still >5% → latched
-    d4 = step(3.0, 0.0)                     # below 5% → restored
-    d5 = step(60.0, 0.0)                    # drives again
-    check("I3", "EV.4.7 plausibility: cut at >25%+brake, latched until <5%",
-          d1.T_RL > 50 and d2.T_RL == 0.0 and d3.T_RL == 0.0
-          and d5.T_RL > 50 and not ctrl.plaus_cut,
-          f"T through the sequence: {d1.T_RL:.0f} → {d2.T_RL:.0f} → "
-          f"{d3.T_RL:.0f} → {d4.T_RL:.0f} → {d5.T_RL:.0f} N·m")
-
-    # I4: clean sensors ≈ perfect state. Noise/quantization OFF, VCU at the
-    # physics rate: the only remaining difference is the vx ESTIMATE (from
-    # wheel speeds, which slip). Results must stay close — this bounds what
-    # the estimator itself costs.
     model = VehicleModel(vp, MagicFormulaTire(tp_f), MagicFormulaTire(tp_r))
     man = corner_exit()
-    lp = simulate(model, make_configs(vp, tp_f, tp_r, cp)[1], man)
-    ls = simulate(model, make_configs(vp, tp_f, tp_r, cp)[1], man,
-                  sensors=SensorSuite(vp, noise=False), ctrl_every=1)
-    yp = metrics(lp, vp)["dw RMSE [rad/s]"]
-    ys = metrics(ls, vp)["dw RMSE [rad/s]"]
-    check("I4", "clean sensors ≈ perfect state (vx estimation is the only gap)",
-          ls["t"][-1] >= man.duration - 0.01 and 0.5 < ys / yp < 1.5,
-          f"dw RMSE perfect {yp:.4f} vs clean-sensor {ys:.4f} "
-          f"({(ys / yp - 1) * 100:+.0f}%)")
 
     # I5: determinism — same seed → bit-identical noisy runs.
-    la = simulate(model, make_configs(vp, tp_f, tp_r, cp)[1], man,
+    la = simulate(model, make_configs(vp)[1], man,
                   sensors=SensorSuite(vp), ctrl_every=40)
-    lb = simulate(model, make_configs(vp, tp_f, tp_r, cp)[1], man,
+    lb = simulate(model, make_configs(vp)[1], man,
                   sensors=SensorSuite(vp), ctrl_every=40)
-    check("I5", "seeded noise → exactly repeatable runs",
+    check("I5", "seeded noise + firmware → exactly repeatable runs",
           float(np.abs(la["r"] - lb["r"]).max()) == 0.0 and
           float(np.abs(la["T_RL"] - lb["T_RL"]).max()) == 0.0)
-    info("I5", "full noisy stack at 100 Hz (corner exit, s-diff)",
-         f"dw RMSE {metrics(la, vp)['dw RMSE [rad/s]']:.4f} vs perfect "
-         f"{yp:.4f} — noise + VCU rate + estimation all included")
+    info("I5", "full noisy stack at 100 Hz (corner exit, s-diff firmware)",
+         f"dw RMSE {metrics(la, vp)['dw RMSE [rad/s]']:.4f}")
 
     # I7: the ground-speed estimate must beat the naive wheel-only pick, and
     # must stay bounded through a traction event. With four driven wheels
     # min(w)*r_w is no longer a lower bound on ground speed, so this is the
     # check that catches a revert to it.
-    li = simulate(model, make_configs(vp, tp_f, tp_r, cp)[1], corner_exit(),
+    li = simulate(model, make_configs(vp)[1], corner_exit(),
                   sensors=SensorSuite(vp), ctrl_every=40)
     err_est = float(np.abs(li["vx_est"] - li["vx"]).max())
     wheel_only = np.minimum(li["wRL"], li["wRR"]) * vp.r_wheel
@@ -1022,39 +874,48 @@ def section_i():
           f"worst |vx_est − vx| = {err_est:.3f} m/s vs {err_wss:.3f} m/s for "
           f"min(driven wheels)·r_w over corner_exit")
 
-    # I6: pedal map round trip. DriverAdapter turns the maneuver's requested
-    # torque into an APPS percentage and the controller turns it back; the two
-    # are exact inverses ONLY while both scale by the same driven-wheel count.
-    # If driver.py and the controller ever disagree (2 vs 4 motors), every
-    # sensor-vs-perfect-state comparison is silently confounded — this is the
-    # check that catches it.
+    # I6: pedal map round trip, through the real firmware. DriverAdapter turns
+    # a scripted torque into an APPS percentage; the firmware turns that into
+    # a motor current; Kt × gear × driven wheels turns it back into torque. If
+    # the adapter and the firmware ever disagree (a changed current cap, a
+    # different driven-wheel count), every maneuver's torque is silently wrong.
     adapter = DriverAdapter(vp)
+    k = vp.motor_kt * vp.gear_ratio / 1000.0 * vp.driven_wheels
     worst = 0.0
-    for frac in np.linspace(0.0, 1.0, 21):
+    for frac in (0.1, 0.3, 0.5, 0.7, 0.9):
         T_in = frac * vp.T_drive_max
         apps = adapter.inputs(0.0, T_in).apps_pct
-        T_back = vp.T_drive_max * apps / 100.0     # the controller's pedal map
-        worst = max(worst, abs(T_back - T_in))
-    check("I6", "pedal map: driver adapter and controller are exact inverses",
-          worst < 1e-9,
-          f"worst round-trip error {worst:.1e} N·m over 0..{vp.T_drive_max:.0f} "
-          f"N·m ({vp.driven_wheels} driven wheels)")
+        rl, rr = _drive(SIL_OPEN_EXE, 0.0, 5, apps=apps)[-1]
+        worst = max(worst, abs(0.5 * (rl + rr) * k - T_in) / vp.T_drive_max)
+    check("I6", "pedal map: driver adapter and firmware are inverses",
+          worst < 0.01,
+          f"worst round-trip error {worst * 100:.2f}% of {vp.T_drive_max:.0f} N·m "
+          f"({vp.driven_wheels} driven wheels, ADC quantization included)")
 
 
 def main():
     print("FSAE-Sim physics verification — independent cross-checks")
     print("=" * 64)
+    from sil.vcu_sil import ensure_firmware, FirmwareError
+    try:
+        ensure_firmware()
+        fw_ok = True
+    except FirmwareError as e:
+        check("F0", "VCU firmware found and compiled", False, str(e))
+        fw_ok = False
+    needs_fw = {"F", "G", "I"}
     for name, fn in (("A. tire model", section_a),
                      ("B. vertical loads", section_b),
                      ("C. slip kinematics", section_c),
                      ("D. EOM & integration", section_d),
                      ("E. vs bicycle model", section_e),
-                     ("F. controller limits (s-diff)", section_f),
-                     ("F2. four-corner allocator limits", section_f2),
-                     ("G. in-run audit", section_g),
-                     ("H. VCU-rate robustness", section_h),
+                     ("F. VCU firmware vs its own source", section_f),
+                     ("G. in-run audit (firmware in the loop)", section_g),
                      ("I. sensor stack", section_i)):
         print(f"\n── {name} " + "─" * (60 - len(name)))
+        if name[0] in needs_fw and not fw_ok:
+            print("   skipped — the firmware did not build (see F0)")
+            continue
         fn()
     print("\n" + "=" * 64)
     n_pass = sum(1 for r in RESULTS if r.startswith("[PASS]"))

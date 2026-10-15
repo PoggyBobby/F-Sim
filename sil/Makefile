@@ -12,11 +12,18 @@
 # The sources are copied to build/src and the patches in patches/ applied
 # there first — the submodule itself is never modified. Each patch is a
 # firmware bug the host build cannot live with; the goal is zero patches.
+#
+# Two binaries come out:
+#   build/vcu_sil       the firmware as flashed — main.c calls SDiff_new(TRUE)
+#   build/vcu_sil_open  identical except SDiff_new(FALSE): the firmware's own
+#                       s-diff switch turned off, so both rear motors get the
+#                       same command. This is the "open diff" config.
 
 VCU   ?= SRE-VCU
 CC    ?= cc
 BUILD  = build
 BIN    = $(BUILD)/vcu_sil
+BIN_OPEN = $(BUILD)/vcu_sil_open
 
 # -Ihost comes first so host/APDB.h shadows the firmware's (see that file)
 #
@@ -34,12 +41,17 @@ VCU_SRCS  = $(wildcard $(VCU)/dev/*.c)
 HOST_SRCS = $(wildcard host/*.c)
 PATCHES   = $(wildcard patches/*.patch)
 SRC       = $(BUILD)/src
-OBJS = $(patsubst $(VCU)/dev/%.c,$(BUILD)/vcu/%.o,$(VCU_SRCS)) \
-       $(patsubst host/%.c,$(BUILD)/host/%.o,$(HOST_SRCS))
+SRC_OPEN  = $(BUILD)/src_open
+HOST_OBJS = $(patsubst host/%.c,$(BUILD)/host/%.o,$(HOST_SRCS))
+OBJS = $(patsubst $(VCU)/dev/%.c,$(BUILD)/vcu/%.o,$(VCU_SRCS)) $(HOST_OBJS)
+OBJS_OPEN = $(patsubst $(VCU)/dev/%.c,$(BUILD)/vcu_open/%.o,$(VCU_SRCS)) $(HOST_OBJS)
 
-all: $(BIN)
+all: $(BIN) $(BIN_OPEN)
 
 $(BIN): $(OBJS)
+	$(CC) -o $@ $^ $(LDLIBS)
+
+$(BIN_OPEN): $(OBJS_OPEN)
 	$(CC) -o $@ $^ $(LDLIBS)
 
 # patched copy of the firmware sources
@@ -52,12 +64,26 @@ $(SRC)/.patched: $(VCU_SRCS) $(wildcard $(VCU)/dev/*.h) $(PATCHES)
 $(BUILD)/vcu/%.o: $(SRC)/.patched | $(BUILD)/vcu
 	$(CC) $(CFLAGS) -c -o $@ $(SRC)/$*.c
 
+# the open-diff copy: same patched sources, s-diff switch off in main.c.
+# Fails loudly if main.c stops calling SDiff_new(TRUE), rather than silently
+# building a second copy of the s-diff.
+$(SRC_OPEN)/.patched: $(SRC)/.patched
+	rm -rf $(SRC_OPEN) && mkdir -p $(SRC_OPEN)
+	cp $(SRC)/*.c $(SRC)/*.h $(SRC_OPEN)/
+	grep -q 'SDiff_new(TRUE)' $(SRC_OPEN)/main.c || \
+	    { echo "main.c no longer calls SDiff_new(TRUE): update the open-diff build in sil/Makefile"; exit 1; }
+	sed -i.bak 's/SDiff_new(TRUE)/SDiff_new(FALSE)/' $(SRC_OPEN)/main.c && rm $(SRC_OPEN)/main.c.bak
+	touch $@
+
+$(BUILD)/vcu_open/%.o: $(SRC_OPEN)/.patched | $(BUILD)/vcu_open
+	$(CC) $(CFLAGS) -c -o $@ $(SRC_OPEN)/$*.c
+
 # io_stubs.c includes the firmware's own sensorCalculations.h for the SAS
 # calibration, so the patched copy has to exist before the host objects build.
 $(BUILD)/host/%.o: host/%.c $(SRC)/.patched | $(BUILD)/host
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/vcu $(BUILD)/host:
+$(BUILD)/vcu $(BUILD)/vcu_open $(BUILD)/host:
 	mkdir -p $@
 
 clean:

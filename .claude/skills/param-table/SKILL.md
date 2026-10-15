@@ -21,7 +21,7 @@ git diff --name-only HEAD~1 -- '*params.yaml'            # last commit
 ```
 
 Any hit means the table may be stale. Adding or deleting a `params.yaml`
-counts — the loader discovers files by walking `model/`, `controllers/`, `sil/`.
+counts — the loader discovers files by walking `model/` and `sil/`.
 
 ## 2. Check
 
@@ -59,11 +59,11 @@ The same edit invalidates two other generated artifacts:
 
 ```bash
 .venv/bin/python param_sheet.py     # docs/datasheets/FSAE-Sim Parameters.xlsx
-.venv/bin/python verify.py          # 80 checks; must pass before any run
+.venv/bin/python verify.py          # every check must pass before any run
 ```
 
-And if vehicle or tire numbers moved meaningfully, the controller gains in
-`controllers/python/params.yaml` need retuning.
+The controller is the VCU firmware; its constants live in `sdiff.c`, not in
+a params.yaml, so nothing here needs retuning when car numbers move.
 
 ## Rules
 

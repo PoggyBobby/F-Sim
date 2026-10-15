@@ -8,8 +8,8 @@ about: >
   Layout (team-confirmed 2026-08-30): FOUR motors fitted, one per wheel (hub
   drive, planetary reduction in each upright). The sim drives all four as of
   2026-09-09; a rear-drive configuration is the same plant with zero front
-  torque. See README.md and the four-corner allocator's own params file,
-  controllers/python/awd/params.yaml.
+  torque. The firmware commands the two rear motors; with driven_wheels = 4
+  the SIL mirrors each rear command onto the same-side front (sil/vcu_sil.py).
 
   Motors: AMK "Racing Kit" A2370DD (DD5-type synchronous servo) with
   KW26-S5-FSE-4Q inverters — see docs/datasheets/AMK Racing Kit Datasheet.pdf
@@ -87,8 +87,24 @@ motor_kt:
     motor_torque_peak / peak current.
   why: >
     The ONLY number that makes the VCU's milliamp command mean anything in the
-    sim: T_wheel = I[A] * Kt * gear_ratio. At 0.2 the firmware's 125 A
-    full-throttle command asks for 325 N*m per wheel, above the 273 N*m peak.
+    sim: T_wheel = I[A] * Kt * gear_ratio. It also sets what 100% pedal is
+    worth (max_motor_current below), so a wrong Kt scales every run's torque.
+
+max_motor_current:
+  label:  "Full-pedal motor current (firmware cap)"
+  value:  70.0
+  unit:   A
+  symbol: MAX_MOTOR_CURRENT_MA
+  status: CURRENT CAR (powertrainControl.h MAX_MOTOR_CURRENT_MA, S-diff 5df1baf)
+  what:   Motor current the VCU commands at 100% pedal. The firmware's pedal map is linear to it.
+  need:   Confirmation this is the intended full-throttle current, not a bring-up limit
+  how:    dev/powertrainControl.h on the SRE-VCU S-diff branch
+  why: >
+    The firmware is the only controller, and it never asks for the motors'
+    datasheet peak: 100% pedal is this current, through Kt and the gearbox.
+    The driver adapter inverts the same map, so a maneuver's scripted torque
+    is what the firmware actually commands. Mirrors the C #define; if the
+    firmware changes it, change it here.
 
 
 
