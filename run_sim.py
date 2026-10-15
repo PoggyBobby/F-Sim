@@ -369,10 +369,14 @@ def main():
     model = VehicleModel(vp, MagicFormulaTire(tp_f), MagicFormulaTire(tp_r))
     maneuvers = build_maneuvers(args, vp,
                                 interactive=args.ask and sys.stdin.isatty())
+    # the firmware is the controller: build it (or confirm it is current)
+    # before anything else, and stop with the fix if that is not possible
+    from sil.vcu_sil import ensure_firmware, FirmwareError
     try:
-        config_names = [c.name for c in make_configs(vp)]
-    except FileNotFoundError as e:
-        ap.error(str(e))
+        ensure_firmware()
+    except FirmwareError as e:
+        sys.exit(f"cannot run the sim — {e}")
+    config_names = [c.name for c in make_configs(vp)]
 
     # the firmware reads WSS/IMU/SAS/APPS/BPS at the VCU rate — it has no
     # other way to know anything about the car

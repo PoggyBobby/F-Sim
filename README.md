@@ -26,6 +26,65 @@ same-side front — a sim-side assumption, printed with every run.
 through Kt and the gearbox. A maneuver's scripted torque is turned into the
 pedal position that produces it, using that same map.
 
+### VCU firmware (SIL) setup
+
+The sim cannot run without the VCU firmware: it is the only controller.
+
+**Where it goes.** The firmware source lives at `sil/SRE-VCU/`. That folder is
+a git submodule of [spartanracingelectric/SRE-VCU](https://github.com/spartanracingelectric/SRE-VCU),
+pinned to a specific commit on the `S-diff` branch (currently `5df1baf`). Do
+not copy files into it and do not edit it: the build copies the sources to
+`sil/build/src/` and applies the fixes in `sil/patches/` there.
+
+**First time.** After cloning this repo:
+
+```
+git submodule update --init sil/SRE-VCU
+```
+
+If you forget, `run_sim.py` and `verify.py` try this once on their own.
+
+**Building.** Nothing to do by hand. Every `run_sim.py` and `verify.py` run
+checks that both binaries (`sil/build/vcu_sil` and `sil/build/vcu_sil_open`)
+exist and are newer than their source, and rebuilds them if not. You only need
+`make` and a C compiler (macOS: `xcode-select --install`; Linux:
+`apt install build-essential`). To build or debug by hand:
+
+```
+make -C sil            # both binaries
+make -C sil clean      # start over
+```
+
+**Testing your own firmware.** To run the sim against a different SRE-VCU
+checkout, such as a branch you are working on, point at it instead of editing the
+submodule:
+
+```
+export SRE_VCU_DIR=/path/to/your/SRE-VCU
+.venv/bin/python run_sim.py --maneuver corner_exit
+unset SRE_VCU_DIR      # back to the pinned submodule
+```
+
+Switching source trees triggers a clean rebuild automatically.
+
+**Moving the pin to newer firmware.**
+
+```
+git -C sil/SRE-VCU fetch origin S-diff && git -C sil/SRE-VCU checkout <commit>
+git add sil/SRE-VCU    # commit the new pin with your change
+.venv/bin/python verify.py
+```
+
+Section F of `verify.py` checks the firmware against the constants in its own
+`sdiff.c`. If the new firmware changes `MAX_MOTOR_CURRENT_MA`, update
+`max_motor_current` in `model/physical/drivetrain/params.yaml` to match.
+
+**If the build fails,** the error ends with the compiler's last lines. The usual
+causes are a firmware change that broke a patch in `sil/patches/`, or `main.c`
+no longer calling `SDiff_new(TRUE)` (the open-diff build flips that one call).
+The inverter CAN IDs in `sil/host/sil_link.c` must also match the firmware's
+`canOutput_sendDebugMessage1`.
+
 ## Commands to run
 
 ```
@@ -33,9 +92,8 @@ pedal position that produces it, using that same map.
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 
-# build the firmware (both configs) — needed before anything else
+# fetch the firmware source once (it is built automatically on each run)
 git submodule update --init sil/SRE-VCU
-make -C sil
 
 # verify the physics and the firmware against its own sdiff.c
 .venv/bin/python verify.py

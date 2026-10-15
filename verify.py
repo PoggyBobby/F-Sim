@@ -896,6 +896,14 @@ def section_i():
 def main():
     print("FSAE-Sim physics verification — independent cross-checks")
     print("=" * 64)
+    from sil.vcu_sil import ensure_firmware, FirmwareError
+    try:
+        ensure_firmware()
+        fw_ok = True
+    except FirmwareError as e:
+        check("F0", "VCU firmware found and compiled", False, str(e))
+        fw_ok = False
+    needs_fw = {"F", "G", "I"}
     for name, fn in (("A. tire model", section_a),
                      ("B. vertical loads", section_b),
                      ("C. slip kinematics", section_c),
@@ -905,6 +913,9 @@ def main():
                      ("G. in-run audit (firmware in the loop)", section_g),
                      ("I. sensor stack", section_i)):
         print(f"\n── {name} " + "─" * (60 - len(name)))
+        if name[0] in needs_fw and not fw_ok:
+            print("   skipped — the firmware did not build (see F0)")
+            continue
         fn()
     print("\n" + "=" * 64)
     n_pass = sum(1 for r in RESULTS if r.startswith("[PASS]"))

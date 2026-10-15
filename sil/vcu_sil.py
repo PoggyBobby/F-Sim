@@ -47,18 +47,92 @@ SafetyChecker_reduceTorque() computes its multiplier and discards it
 """
 
 import os
+import shutil
 import subprocess
 from dataclasses import dataclass
 
 from model.config import cfg
 
 # This module lives in sil/, next to the Makefile that builds the binaries.
-_BUILD = os.path.join(os.path.dirname(os.path.abspath(__file__)), "build")
+SIL_DIR = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_VCU_DIR = os.path.join(SIL_DIR, "SRE-VCU")     # the git submodule
+_BUILD = os.path.join(SIL_DIR, "build")
 SIL_EXE = os.path.join(_BUILD, "vcu_sil")            # s-diff on (as flashed)
 SIL_OPEN_EXE = os.path.join(_BUILD, "vcu_sil_open")  # s-diff switch off
 SIL_NAME = "s-diff"
 OPEN_NAME = "open diff"
 MODE_NAMES = {0: "none", 1: "duty", 2: "current"}
+
+
+class FirmwareError(RuntimeError):
+    """The firmware could not be found or built. The message says how to fix it."""
+
+
+def vcu_source_dir():
+    """Where the firmware source comes from: $SRE_VCU_DIR if set (any SRE-VCU
+    checkout), otherwise the sil/SRE-VCU submodule."""
+    return os.path.abspath(os.environ.get("SRE_VCU_DIR") or DEFAULT_VCU_DIR)
+
+
+def ensure_firmware(log=print):
+    """Make sure both firmware binaries exist AND match their source, building
+    them if not. Called before every run and every audit, so an edited or
+    updated firmware can never run as a stale binary.
+
+    Raises FirmwareError, with the fix spelled out, if the source is missing
+    or does not compile. See README.md, "VCU firmware (SIL) setup"."""
+    vcu = vcu_source_dir()
+    custom = vcu != os.path.abspath(DEFAULT_VCU_DIR)
+    main_c = os.path.join(vcu, "dev", "main.c")
+
+    # 1. the source. An empty sil/SRE-VCU means the submodule was never
+    #    fetched — try once, then explain.
+    if not os.path.isfile(main_c) and not custom:
+        log("  firmware: sil/SRE-VCU is empty — fetching the submodule ...")
+        subprocess.run(["git", "submodule", "update", "--init", "sil/SRE-VCU"],
+                       cwd=os.path.dirname(SIL_DIR), capture_output=True)
+    if not os.path.isfile(main_c):
+        where = (f"SRE_VCU_DIR={vcu}" if custom else "sil/SRE-VCU")
+        raise FirmwareError(
+            f"no VCU firmware source at {where} (expected dev/main.c there).\n"
+            "  Fix:  git submodule update --init sil/SRE-VCU\n"
+            "  or point at your own checkout:  export SRE_VCU_DIR=/path/to/SRE-VCU\n"
+            "  (README.md, 'VCU firmware (SIL) setup')")
+
+    # 2. the toolchain
+    if shutil.which("make") is None or not (shutil.which("cc") or shutil.which("clang")
+                                            or shutil.which("gcc")):
+        raise FirmwareError(
+            "building the firmware needs make and a C compiler.\n"
+            "  macOS: xcode-select --install    Linux: apt install build-essential")
+
+    # 3. build. sil/build/.vcu_source records which source tree the build
+    #    directory holds. A different (or unknown) one means a clean rebuild —
+    #    make's timestamps cannot tell two checkouts apart. It is written BEFORE
+    #    building and deleted on failure, so a failed build never leaves a
+    #    half-built tree that the next attempt would trust.
+    stamp = os.path.join(_BUILD, ".vcu_source")
+    last = open(stamp).read().strip() if os.path.exists(stamp) else None
+    make = ["make", "-C", SIL_DIR, "-s", f"VCU={vcu}"]
+    if last == vcu and os.path.exists(SIL_EXE) and os.path.exists(SIL_OPEN_EXE) \
+            and subprocess.run(make + ["-q"], capture_output=True).returncode == 0:
+        return                                       # built from this source, current
+    if last != vcu:
+        subprocess.run(["make", "-C", SIL_DIR, "-s", "clean"], capture_output=True)
+    os.makedirs(_BUILD, exist_ok=True)
+    with open(stamp, "w") as fh:
+        fh.write(vcu + "\n")
+    log(f"  firmware: building both configs from {vcu} (make -C sil) ...")
+    r = subprocess.run(make, capture_output=True, text=True)
+    if r.returncode != 0 or not (os.path.exists(SIL_EXE) and os.path.exists(SIL_OPEN_EXE)):
+        os.remove(stamp)
+        tail = "\n".join((r.stderr or r.stdout).strip().splitlines()[-15:])
+        raise FirmwareError(
+            "the VCU firmware did not compile:\n" + tail + "\n"
+            "  Rebuild by hand to see everything:  make -C sil\n"
+            "  A firmware change may also have broken a patch in sil/patches/ "
+            "or the open-diff build (it needs SDiff_new(TRUE) in main.c).")
+    log("  firmware: built.")
 
 
 @dataclass
@@ -91,8 +165,9 @@ class VcuProcess:
 
     def __init__(self, exe=SIL_EXE):
         if not os.path.exists(exe):
-            raise FileNotFoundError(
-                f"{exe} not found — build the VCU first:  make -C sil")
+            raise FirmwareError(
+                f"{exe} not found. Build it with ensure_firmware() or "
+                "make -C sil (README.md, 'VCU firmware (SIL) setup').")
         self.exe = exe
         self.proc = None
         self.t_vcu = 0.0

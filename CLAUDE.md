@@ -13,7 +13,7 @@ The repo is **private** and cannot be made public as-is — see `docs/PUBLISHING
 ```bash
 # first-time setup
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-git submodule update --init sil/SRE-VCU && make -C sil   # REQUIRED: the firmware is the controller
+git submodule update --init sil/SRE-VCU   # REQUIRED: the firmware is the controller (built automatically)
 
 # the audit — physics plus the firmware against its own sdiff.c; the check
 # count is printed at the end (96 checks, ~40 s at the time of writing); exit 1
@@ -121,7 +121,7 @@ The firmware's milliamp command becomes wheel torque through `motor_kt × gear_r
 
 ### SIL — the real firmware in the loop
 
-`make -C sil` compiles the actual SRE-VCU firmware for the host, twice (`vcu_sil` and `vcu_sil_open`, see above): XC2000 types replaced by `sil/host/host_types.h` (force-included), the TTTech IO library replaced by `sil/host/io_stubs.c`, which serves pedal/brake/steering/LV ADC channels and a fake BMS on CAN from the sim's sensor frame. **The submodule is never modified** — sources are copied to `sil/build/src` and the patches in `sil/patches/` applied there; each patch is a firmware bug the host build can't live with, and the goal is zero patches. `sil/vcu_sil.py` runs each binary as a child process, one text line per VCU cycle over stdin/stdout (protocol in `sil/host/sil_link.h`).
+`make -C sil` compiles the actual SRE-VCU firmware for the host, twice (`vcu_sil` and `vcu_sil_open`, see above): XC2000 types replaced by `sil/host/host_types.h` (force-included), the TTTech IO library replaced by `sil/host/io_stubs.c`, which serves pedal/brake/steering/LV ADC channels and a fake BMS on CAN from the sim's sensor frame. **The submodule is never modified** — sources are copied to `sil/build/src` and the patches in `sil/patches/` applied there; each patch is a firmware bug the host build can't live with, and the goal is zero patches. `sil/vcu_sil.py` runs each binary as a child process, one text line per VCU cycle over stdin/stdout (protocol in `sil/host/sil_link.h`). `ensure_firmware()` runs before every `run_sim.py` and `verify.py`: it fetches an empty submodule once, rebuilds when the binaries are missing or older than their source, rebuilds clean when the source tree changes (`sil/build/.vcu_source`), and raises `FirmwareError` with the fix otherwise — `run_sim.py` exits, `verify.py` fails F0 and skips F, G, I. `$SRE_VCU_DIR` points the build at any other SRE-VCU checkout without touching the submodule. Setup steps for people: README.md, "VCU firmware (SIL) setup".
 
 ### Run artifacts
 
