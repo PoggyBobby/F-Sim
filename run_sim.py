@@ -1,5 +1,7 @@
-"""Entry point: run all maneuvers across all four controller configurations,
-print comparison tables, save plots + animated replays, and record the run.
+"""Entry point: run the maneuvers across both configurations — the real VCU
+firmware with its s-diff switched off ("open diff") and on ("s-diff"), run
+software-in-the-loop (sil/) — print comparison tables, save plots + animated
+replays, and record the run. Build the firmware first: make -C sil
 
 EVERY run is recorded. `runs/<NNN>__<date>__<label>/` gets the time-series
 data, the plots, the replay videos, the complete parameter set with its
@@ -27,7 +29,7 @@ from model.config import cfg
 from model.params import default_setup, G
 from model.physical.tires.tire import MagicFormulaTire
 from model.physical.vehicle import VehicleModel
-from controllers.python.torque_allocator import make_configs
+from sil.vcu_sil import make_configs
 from model.maneuvers.maneuvers import step_steer, corner_exit, slalom, pedal_check
 from model.maneuvers.tracks import track_maneuvers, model_for, CORNER_TYPES
 import model.maneuvers.tracks as _tracks
@@ -276,8 +278,10 @@ def build_maneuvers(args, vp, interactive):
         mans.append(step_steer(delta_deg=v["st_d"], vx0=v["st_v"],
                                T_hold=v["st_T"]))
     if want("corner_exit"):
+        # never past full pedal — the driver adapter could not command more
         mans.append(corner_exit(delta_deg=v["co_d"], vx0=v["co_v"],
-                                T_max_total=v["co_p"] / 100.0 * peak))
+                                T_max_total=min(v["co_p"] / 100.0 * peak,
+                                                vp.T_drive_max)))
     if want("slalom"):
         mans.append(slalom(delta_deg=v["sl_d"], freq_hz=v["sl_f"],
                            vx0=v["sl_v"], T_hold=v["sl_T"]))
@@ -326,12 +330,6 @@ def main():
                          f"(default {_tracks.DEFAULT_ENTRY_FRAC:g})")
     tg.add_argument("--track-right", action="store_true",
                     help="right-hand corners instead of left-hand")
-    ap.add_argument("--sil", action="store_true",
-                    help="add the real VCU firmware as a fifth config, "
-                         "software-in-the-loop (build it first: make -C sil)")
-    ap.add_argument("--perfect-state", action="store_true",
-                    help="bypass the sensor stack: controller reads the "
-                         "sim's true state (pre-2026-08-31 behavior)")
     ap.add_argument("--ask", action="store_true",
                     help="interactively ask for the maneuver test values "
                          "(speed, steer, throttle) — Enter keeps defaults")
@@ -367,38 +365,29 @@ def main():
     plt.rcParams.update(RC)
 
     # all numbers come from the params.yaml files (via model/config.py)
-    vp, tp_f, tp_r, cp = default_setup()
+    vp, tp_f, tp_r = default_setup()
     model = VehicleModel(vp, MagicFormulaTire(tp_f), MagicFormulaTire(tp_r))
     maneuvers = build_maneuvers(args, vp,
                                 interactive=args.ask and sys.stdin.isatty())
-    config_names = [c.name for c in make_configs(vp, tp_f, tp_r, cp)]
-    if args.sil:
-        if args.perfect_state:
-            ap.error("--sil needs the sensor stack; drop --perfect-state")
-        from sil.vcu_sil import SilController, SIL_NAME
-        config_names.append(SIL_NAME)
+    try:
+        config_names = [c.name for c in make_configs(vp)]
+    except FileNotFoundError as e:
+        ap.error(str(e))
 
-    # sensor stack: the controller reads WSS/IMU/SAS/APPS/BPS at the VCU
-    # rate — the default since 2026-08-31 (--perfect-state to bypass)
-    from model.config import cfg
+    # the firmware reads WSS/IMU/SAS/APPS/BPS at the VCU rate — it has no
+    # other way to know anything about the car
+    from model.sensors import SensorSuite
     dt = 2.5e-4
-    if args.perfect_state:
-        sensors, ctrl_every = None, 1
-    else:
-        from model.sensors import SensorSuite
-        sensors = SensorSuite(vp)
-        ctrl_every = max(1, int(round(1.0 / (dt * cfg.sensors.vcu.rate_hz))))
+    sensors = SensorSuite(vp)
+    ctrl_every = max(1, int(round(1.0 / (dt * cfg.sensors.vcu.rate_hz))))
 
     rec = RunRecorder(label=args.label, note=args.note, csv_hz=args.csv_hz,
                       runs_dir=args.runs_dir,
                       sim_settings={"dt_s": dt, "maneuver_filter":
                                     args.maneuver, "replay_fps": args.fps,
                                     "animated": bool(args.animate),
-                                    "sensor_stack": not args.perfect_state,
-                                    "sil": bool(args.sil),
-                                    "vcu_rate_hz": (cfg.sensors.vcu.rate_hz
-                                                    if not args.perfect_state
-                                                    else "physics rate")})
+                                    "controller": "VCU firmware (SIL)",
+                                    "vcu_rate_hz": cfg.sensors.vcu.rate_hz})
     run_dir = rec.begin(maneuvers, config_names)
 
     print("SJSU Spartan Racing — software-diff basic sim")
@@ -406,25 +395,24 @@ def main():
           f"peak wheel torque {vp.T_wheel_max:.0f} N·m/side"
           "  (sources/tags: the params.yaml files)")
     print(f"  configs: {' | '.join(config_names)}")
-    print("  feedback: " + ("PERFECT STATE (sensor stack bypassed)"
-                            if args.perfect_state else
-                            f"sensor stack (WSS/IMU/SAS/APPS/BPS) at "
-                            f"{cfg.sensors.vcu.rate_hz:g} Hz VCU rate"))
+    print(f"  controller: VCU firmware, software-in-the-loop, reading the "
+          f"sensor stack (WSS/IMU/SAS/APPS/BPS) at {cfg.sensors.vcu.rate_hz:g} Hz")
+    print(f"  100% pedal = {vp.T_drive_max:.0f} N·m total "
+          f"({vp.motor_I_max:.0f} A x Kt {vp.motor_kt:g} x {vp.gear_ratio:g}:1, "
+          f"{vp.driven_wheels} driven wheels)")
     print(f"  run {rec.run_number:03d} '{rec.label}' -> {run_dir}\n")
 
     plots, replays, tables = [], [], {}
     for man in maneuvers:
         t0 = time.time()
-        controllers = make_configs(vp, tp_f, tp_r, cp)
-        if args.sil:
-            controllers.append(SilController(vp))
+        controllers = make_configs(vp)
         # split-µ track tests run on a patched plant (tracks.model_for);
         # every other maneuver gets the base model back unchanged
         results = run_matrix(model_for(man, model), controllers, man, dt=dt,
                              sensors=sensors, ctrl_every=ctrl_every)
         print_table(man, results)
-        if args.sil:
-            print("    " + controllers[-1].summary())
+        for c in controllers:
+            print(f"    [{c.name}] " + c.summary())
         print(f"    ({time.time() - t0:.1f} s of compute)")
 
         rec.add_results(man, results)

@@ -44,13 +44,10 @@ CHANNELS = ("X", "Y", "psi", "delta", "kFL", "kFR", "kRL", "kRR", "r", "vx",
 # direct-label placement per config, in units of the camera half-window, so
 # the labels stay readable (and apart) at any zoom level
 LABEL_OFFSETS = {
-    "open 4WD": (0.0, 0.20),
-    "4-corner AWD": (0.26, -0.16),
-    "s-diff (RWD ref)": (-0.26, -0.16),
-    "VCU (SIL)": (0.0, 0.34),
+    "open diff": (0.0, 0.20),
+    "s-diff": (0.26, -0.16),
 }
-SHORT_NAMES = {"open 4WD": "open", "4-corner AWD": "AWD",
-               "s-diff (RWD ref)": "RWD", "VCU (SIL)": "VCU"}
+SHORT_NAMES = {"open diff": "open", "s-diff": "s-diff"}
 
 
 def label_offset(name):

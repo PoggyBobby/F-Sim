@@ -4,31 +4,27 @@ before running in the actual car.
 Note that there are a few fidelity errors and data mismatches that should be tuned and handled before the controller
 is actually tested on the car. 
 
-### All-wheel drive (2026-09-09)
+### The controller is the real VCU firmware
 
-The car has four AMK motors, one per upright, and the sim now drives all four.
-The plant carries a wheel-spin state per corner and `derivatives()` takes four
-wheel torques in FL, FR, RL, RR order; a rear-drive car is simply zero on the
-fronts, and there is no drive-layout flag.
+There is no Python controller. Every run compares two builds of the SRE-VCU
+firmware (the `S-diff` branch, pinned in `sil/SRE-VCU`), compiled for the host
+and run software-in-the-loop:
 
-Three configs are compared in every run:
+    open diff   main.c with SDiff_new(FALSE) — the firmware's own s-diff switch
+                off, so both motors get the same command
+    s-diff      the firmware as flashed — sdiff.c cuts the inner wheel
 
-    open 4WD           an even four-way split — an open differential
-    4-corner AWD       the four-corner allocator (the default)
-    s-diff (RWD ref)   the two-motor sdiff.c mirror, for comparison
+Each VCU cycle the sim sends the firmware a sensor frame (pedal, brake,
+steering, wheel speeds, IMU) and reads back the current it commands each rear
+inverter. That current becomes wheel torque through Kt × gear ratio, clipped to
+what the motor can deliver (peak torque, peak power at the wheel's speed).
+Kt is a PLACEHOLDER. The plant drives four wheels; the firmware commands two
+motors, so with `driven_wheels: 4` each rear command is mirrored onto the
+same-side front — a sim-side assumption, printed with every run.
 
-Why the allocator is not just "the s-diff twice": load transfer takes the front
-axle from 43.4% of the car's weight at rest to 28.3% at 1 g, so at 0.8 g a front
-tire saturates at 162 N·m while a rear takes 311 — with 273 N·m available at
-every motor. An even split therefore spins the fronts and wastes nearly half the
-rear axle. The allocator picks front/rear from estimated load before it picks
-anything left/right. Its constants live in `controllers/python/awd/params.yaml`
-and are a design output of this sim, NOT a mirror of the firmware — unlike
-`controllers/python/params.yaml`, which tracks the `#define`s in `sdiff.c`.
-
-Measured on corner exit: four driven wheels are worth about 2 m/s of exit speed
-over the two-motor car, and the allocator takes ~40% off peak wheel slip versus
-an even split at no speed cost.
+100% pedal means what it means in the firmware: MAX_MOTOR_CURRENT_MA (70 A)
+through Kt and the gearbox. A maneuver's scripted torque is turned into the
+pedal position that produces it, using that same map.
 
 ## Commands to run
 
@@ -37,10 +33,14 @@ an even split at no speed cost.
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 
-# verify if the physics are correct, unit tests per operation
+# build the firmware (both configs) — needed before anything else
+git submodule update --init sil/SRE-VCU
+make -C sil
+
+# verify the physics and the firmware against its own sdiff.c
 .venv/bin/python verify.py
 
-# run the actual sim, assumes the controller is in python no SIL yet
+# run the sim: open diff vs s-diff, both the real firmware
 .venv/bin/python run_sim.py
 
 # other flags to run with
@@ -68,10 +68,6 @@ ls runs/latest/plots/ runs/latest/replay/
 .venv/bin/python run_sim.py --maneuver tracks --track split_mu --no-animate   # inner rear on low grip, controller not told
 .venv/bin/python run_sim.py --maneuver tracks --track all --no-animate        # 30deg 45deg 90deg 120deg u_turn split_mu
 
-# bypass the sensors so the controller reads the sims true state
-# splits controller error from estimation error
-.venv/bin/python run_sim.py --perfect-state --no-animate
-
 # rebuild the team spreadsheet after changing any number
 .venv/bin/python param_sheet.py             # writes docs/datasheets/FSAE-Sim Parameters.xlsx
 
@@ -79,7 +75,7 @@ ls runs/latest/plots/ runs/latest/replay/
 $EDITOR model/physical/tires/params.yaml    # grip, magic formula coefficients
 $EDITOR model/physical/mass/params.yaml     # car and driver mass
 $EDITOR model/physical/geometry/params.yaml # wheelbase, track, cg, yaw inertia
-$EDITOR controllers/python/params.yaml      # the tuned controller gains
+# s-diff constants live in the firmware: sil/SRE-VCU/dev/sdiff.c
 
 # then re verify, re run, re generate the sheet
 .venv/bin/python verify.py && .venv/bin/python run_sim.py --no-animate
@@ -98,13 +94,6 @@ for p in cfg.params():
 # fit the nine magic formula coefficients from ttc data
 # needs the restricted .mat files in ttc/, gitignored, member teams only
 .venv/bin/python tire_fit.py --cornering ttc/*run31.mat --drivebrake ttc/*run72.mat --pressure 12 --out ttc/fit_hoosier_r20
-
-# build the real vcu firmware and run it as a fourth config
-# (its two rear commands are MIRRORED onto the fronts — sim-side
-#  assumption, not firmware behaviour; summary() says so each run)
-git submodule update --init sil/SRE-VCU
-make -C sil
-.venv/bin/python run_sim.py --sil --maneuver step_steer --no-animate
 
 # if make fails on incompatible pointer types your compiler is newer than the firmware
 # pre existing, not a sim problem, this builds it anyway

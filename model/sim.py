@@ -1,7 +1,8 @@
 """Simulation loop (fixed-step RK4) + logging + summary metrics.
 
 Structure of one step, mirroring a real VCU running on a zero-order hold:
-    1. controller reads the current (perfectly measured) state -> four torques
+    1. every `ctrl_every` steps the controller — the VCU firmware, via
+       sil/vcu_sil.py — reads the sensor frame and returns four wheel torques
     2. torques and steer are held constant while the vehicle physics is
        integrated one dt with classic RK4
 
@@ -38,13 +39,13 @@ def simulate(model: VehicleModel, controller, maneuver, dt=2.5e-4, log_every=4,
     """Run one maneuver with one controller. Returns a dict of numpy arrays
     (logged every `log_every` steps => 1 kHz logs at the default dt).
 
-    sensors=None  → controller reads the true state every physics step (the
-                    original perfect-feedback mode, used by verify.py).
     sensors=SensorSuite → the controller reads ONLY sensor measurements
                     (WSS/IMU/SAS/APPS/BPS), sampled every `ctrl_every`
                     physics steps = the VCU rate, held (ZOH) in between.
-    The PLANT inputs are identical in both modes — only what the controller
-    KNOWS changes."""
+                    Every real run; the firmware cannot read anything else.
+    sensors=None  → the controller's update(s, delta, T_req, dt) is called
+                    with the true state. Only verify.py's physics fixtures
+                    use this, to drive the plant with exact known torques."""
     from model.config import cfg
     p = model.p
     controller.reset()
@@ -77,7 +78,6 @@ def simulate(model: VehicleModel, controller, maneuver, dt=2.5e-4, log_every=4,
            ("t", "X", "Y", "psi", "vx", "vy", "r",
             "wFL", "wFR", "wRL", "wRR",
             "delta", "T_req", "T_FL", "T_FR", "T_RL", "T_RR", "dw_target",
-            "dT_sdiff", "delta_norm", "f_applied", "g_left_appl", "g_right_appl",
             "beta", "ay", "ax",
             "kFL", "kFR", "kRL", "kRR",
             "FzFL", "FzFR", "FzRL", "FzRR", "P_total",
@@ -117,9 +117,6 @@ def simulate(model: VehicleModel, controller, maneuver, dt=2.5e-4, log_every=4,
                 log["T" + "_" + nm].append(dbg.T[i])
             log["delta"].append(delta); log["T_req"].append(T_req)
             log["dw_target"].append(dbg.dw_target)
-            log["dT_sdiff"].append(dbg.dT_sdiff)
-            log["delta_norm"].append(dbg.delta_norm); log["f_applied"].append(dbg.f_applied)
-            log["g_left_appl"].append(dbg.g_left_appl); log["g_right_appl"].append(dbg.g_right_appl)
             log["beta"].append(math.atan2(s[IVY], max(s[IVX], 0.5)))
             log["ay"].append(info["ay"]); log["ax"].append(info["ax"])
             for i, nm in enumerate(WHEEL_NAMES):
@@ -133,7 +130,7 @@ def simulate(model: VehicleModel, controller, maneuver, dt=2.5e-4, log_every=4,
                 log["apps"].append(sr.apps_pct)
                 log["bps"].append(sr.bps_bar)
                 log["handwheel"].append(sr.handwheel_deg)
-                log["plaus_cut"].append(1.0 if controller.plaus_cut else 0.0)
+                log["plaus_cut"].append(1.0 if getattr(controller, "plaus_cut", False) else 0.0)
             else:
                 for nm in ("vx_est", "r_meas", "apps", "bps", "handwheel",
                            "plaus_cut"):

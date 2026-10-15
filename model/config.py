@@ -20,7 +20,6 @@ WHERE THE NUMBERS ARE
     model/physical/numerical/params.yaml     solver guards
     model/physical/tires/params.yaml         Magic Formula coefficients
     model/sensors/<sensor>/params.yaml       one file per sensor
-    controllers/python/params.yaml           the tuned controller gains
     sil/params.yaml                          software-in-the-loop timing
 
 READING A VALUE
@@ -71,8 +70,8 @@ HOW TO EDIT
 2. When you replace a value, update its `status` (e.g.
    `MEASURED 2026-09-01 (corner scales)`) so we know which numbers are real.
 3. After editing, just rerun:  .venv/bin/python run_sim.py
-   NOTE: if vehicle/tire values change meaningfully, the controller gains in
-   controllers/python/params.yaml must be retuned.
+   The controller is the VCU firmware (sil/); its constants live in sdiff.c,
+   not here.
 4. Regenerate the team sheet with:  .venv/bin/python param_sheet.py
 
 (Test-maneuver settings — speeds, steer angles, throttle profiles — are
@@ -109,7 +108,7 @@ UNITS = {
     "m/s": 1.0, "mph": MPH, "km/h": 1.0 / 3.6,
     # force / torque / power / pressure
     "N": 1.0, "N*m": 1.0, "lbft": LBFT,
-    "N*m/rad": 1.0, "N*m/A": 1.0,"N*m/(rad/s)": 1.0,
+    "N*m/rad": 1.0, "N*m/A": 1.0, "A": 1.0,"N*m/(rad/s)": 1.0,
     "W": 1.0, "hp": HP,
     "bar": 1.0, "V": 1.0,
     # composite / dimensionless
@@ -142,7 +141,7 @@ REQUIRED_FIELDS = ("unit", "what")
 # to it, so the sim runs the same from any working directory.
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-SEARCH_DIRS = ("model", "controllers", "sil")
+SEARCH_DIRS = ("model", "sil")
 
 
 class ConfigError(Exception):

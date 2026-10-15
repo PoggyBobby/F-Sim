@@ -1,10 +1,17 @@
-"""Software-in-the-loop: the real VCU firmware as a controller configuration.
+"""Software-in-the-loop: the real VCU firmware is the only controller.
 
-`make -C sil` builds sil/build/vcu_sil from the SRE-VCU sources (see
-sil/Makefile). This module runs that binary as a child process and makes
-it look like one more controller to sim.py: every VCU cycle the sensor
-readings go down a pipe as one text line and what the firmware put on the
-rear inverters' command frames comes back (protocol: sil/host/sil_link.h).
+`make -C sil` builds two binaries from the SRE-VCU sources (see sil/Makefile):
+build/vcu_sil, the firmware as flashed, and build/vcu_sil_open, the same code
+with main.c's SDiff_new(TRUE) flipped to FALSE. make_configs() turns them into
+the two configurations every run compares:
+
+    "open diff"  firmware, s-diff switch off — both motors get the same command
+    "s-diff"     firmware as flashed — sdiff.c cuts the inner wheel
+
+This module runs a binary as a child process and makes it look like a
+controller to sim.py: every VCU cycle the sensor readings go down a pipe as
+one text line and what the firmware put on the rear inverters' command frames
+comes back (protocol: sil/host/sil_link.h).
 
 Each run boots a fresh VCU (reset() restarts the process) and first lets
 it run its power-up sequence — bench check, ADC settle — by feeding idle
@@ -12,9 +19,13 @@ frames until the firmware's own clock passes VCU_SIL_BOOT_S. Only then
 does the maneuver's t = 0 begin.
 
 The firmware commands the inverters in duty cycle or current, not torque, so
-the sim converts: T_wheel = mA x motor_kt x gear_ratio, clipped to the
-per-wheel peak. (motor_kt is a PLACEHOLDER — everything this config puts on
-the plant is scaled by an unmeasured number.)
+the sim converts: T_wheel = mA x motor_kt x gear_ratio, clipped to what the
+motor can physically deliver — its peak torque, and its peak power at the
+wheel's measured speed (|T| <= P_peak / |w|). That clip is motor physics, not
+control: the firmware has no power limiting of its own, and nothing else in
+the sim enforces the 80 kW rules cap (driven_wheels x motor_power_peak equals
+it exactly, so the per-motor clip bounds the total). (motor_kt is a
+PLACEHOLDER — everything put on the plant is scaled by an unmeasured number.)
 
 FOUR WHEELS, TWO COMMANDS. The plant is AWD but this firmware is a two-motor
 build: powertrainControl.c zeroes motor_fl/motor_fr at construction and nothing
@@ -37,15 +48,42 @@ SafetyChecker_reduceTorque() computes its multiplier and discards it
 
 import os
 import subprocess
+from dataclasses import dataclass
 
 from model.config import cfg
-from controllers.python.debug import ControllerDebug
 
-# This module lives in sil/, next to the Makefile that builds the binary.
-SIL_EXE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                       "build", "vcu_sil")
-SIL_NAME = "VCU (SIL)"
+# This module lives in sil/, next to the Makefile that builds the binaries.
+_BUILD = os.path.join(os.path.dirname(os.path.abspath(__file__)), "build")
+SIL_EXE = os.path.join(_BUILD, "vcu_sil")            # s-diff on (as flashed)
+SIL_OPEN_EXE = os.path.join(_BUILD, "vcu_sil_open")  # s-diff switch off
+SIL_NAME = "s-diff"
+OPEN_NAME = "open diff"
 MODE_NAMES = {0: "none", 1: "duty", 2: "current"}
+
+
+@dataclass
+class ControllerDebug:
+    """What a controller hands the plant each VCU cycle: four wheel torques
+    [N·m] in FL, FR, RL, RR order, plus the one diagnostic the metrics use.
+    sim.py reads `.T`; verify.py's physics fixtures return one too."""
+    T: tuple = (0.0, 0.0, 0.0, 0.0)
+    dw_target: float = 0.0    # kinematic rear wheel-speed difference wRR-wRL [rad/s]
+
+    @property
+    def T_FL(self) -> float:
+        return self.T[0]
+
+    @property
+    def T_FR(self) -> float:
+        return self.T[1]
+
+    @property
+    def T_RL(self) -> float:
+        return self.T[2]
+
+    @property
+    def T_RR(self) -> float:
+        return self.T[3]
 
 
 class VcuProcess:
@@ -104,10 +142,9 @@ class VcuProcess:
 class SilController:
     """Controller-shaped wrapper: sensors in, wheel torques out."""
 
-    name = SIL_NAME
-
-    def __init__(self, vp, exe=SIL_EXE):
+    def __init__(self, vp, exe=SIL_EXE, name=SIL_NAME):
         self.vp = vp
+        self.name = name
         self.vcu = VcuProcess(exe)
         self.plaus_cut = False          # the firmware's business, not ours
         self.t = 0.0
@@ -119,10 +156,6 @@ class SilController:
         self.t = 0.0
         self.cycles, self.cmd_max = {}, {}
 
-    def update(self, s, delta, T_req_total, dt):
-        raise RuntimeError("the SIL controller reads sensors only — "
-                           "run without --perfect-state")
-
     def update_from_sensors(self, sr, dt):
         self.t += dt
         _, mode, cmd_RL, cmd_RR = self.vcu.exchange(
@@ -132,18 +165,25 @@ class SilController:
         self.cmd_max[mode] = max(self.cmd_max.get(mode, 0),
                                  abs(cmd_RL), abs(cmd_RR))
         k = self.vp.motor_kt * self.vp.gear_ratio / 1000.0   # N·m per mA at the wheel
-        T_max = self.vp.T_wheel_max
-        T_RL = max(-T_max, min(T_max, cmd_RL * k))
-        T_RR = max(-T_max, min(T_max, cmd_RR * k))
-        # mirror each rear command onto the same-side front — see the module
-        # docstring. Sim-side assumption, not firmware behaviour.
-        dbg = ControllerDebug(T=(T_RL, T_RR, T_RL, T_RR))
+        # four driven wheels: mirror each rear command onto the same-side front
+        # (see the module docstring — a sim-side assumption, not firmware
+        # behaviour). Two driven wheels: the fronts roll free.
+        rear = (cmd_RL * k, cmd_RR * k)
+        front = rear if self.vp.driven_wheels == 4 else (0.0, 0.0)
+        speeds = (sr.wheel_speed_FL, sr.wheel_speed_FR,
+                  sr.wheel_speed_RL, sr.wheel_speed_RR)
+        T = tuple(self._motor_clip(t, w) for t, w in zip(front + rear, speeds))
+        dbg = ControllerDebug(T=T)
         dbg.dw_target = sr.yaw_rate * self.vp.track_r / self.vp.r_wheel   # diagnostic only
-        # the firmware's internal split is not observable over the S/T link, so
-        # every allocator-specific debug field stays at its default rather than
-        # being filled with a plausible-looking guess
-        dbg.f_applied = 0.5          # true by construction under mirroring
         return dbg
+
+    def _motor_clip(self, T, w):
+        """What one motor can deliver at wheel speed w [rad/s]: its peak
+        torque, and its peak power once P_peak / |w| falls below that."""
+        T_max = self.vp.T_wheel_max
+        if abs(w) > 0.0:
+            T_max = min(T_max, self.vp.motor_P_peak / abs(w))
+        return max(-T_max, min(T_max, T))
 
     def summary(self):
         parts = []
@@ -154,6 +194,15 @@ class SilController:
                          + (f" ({unit[mode]})" if mode in unit else ""))
         return ("VCU command frames per cycle: " + ", ".join(parts)
                 + f" — torque to plant = mA x Kt x gear ({self.vp.motor_kt} N·m/A"
-                + f" x {self.vp.gear_ratio:g}), clipped to ±{self.vp.T_wheel_max:.0f} N·m;"
-                + " FRONTS MIRRORED from the rears (T_FL = T_RL, T_FR = T_RR)"
-                + " — the firmware commands two motors, not four")
+                + f" x {self.vp.gear_ratio:g}), clipped to the motor's "
+                + f"{self.vp.T_wheel_max:.0f} N·m / {self.vp.motor_P_peak / 1e3:.0f} kW"
+                + ("; FRONTS MIRRORED from the rears (T_FL = T_RL, T_FR = T_RR)"
+                   " — the firmware commands two motors, not four"
+                   if self.vp.driven_wheels == 4 else ""))
+
+
+def make_configs(vp):
+    """The two configurations every run compares, both the real firmware.
+    Order is fixed: verify.py indexes it."""
+    return [SilController(vp, SIL_OPEN_EXE, OPEN_NAME),
+            SilController(vp, SIL_EXE, SIL_NAME)]
