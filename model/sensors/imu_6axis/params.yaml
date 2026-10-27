@@ -8,26 +8,26 @@ about: >
 
 gyro_noise_std:
   label:  "IMU gyro noise (1σ)"
-  value:  0.3
+  value:  0.025
   unit:   deg/s
   display_unit: rad/s (entered as deg/s, 1 sigma)
   symbol: sigma_g
-  status: PLACEHOLDER — IMU spec
-  what:   Yaw-gyro 1-sigma noise.
-  need:   IMU datasheet numbers
-  how:    Chosen IMU's spec sheet
+  status: PLACEHOLDER — VectorNav VN-100 datasheet value from memory (0.0035 deg/s/sqrt(Hz) x sqrt(50 Hz)); VERIFY against the sheet
+  what:   Yaw-gyro 1-sigma noise per 100 Hz sample. The car's IMU is a VN-100 (team sensor slide 75).
+  need:   Confirm the VN-100 noise density on its datasheet
+  how:    "VN-100 datasheet: noise density x sqrt(VCU bandwidth)"
   why:    Goes straight into the TV feedback — sets how clean the yaw control can be.
 
 gyro_bias:
   label:  "IMU gyro bias"
-  value:  0.1
+  value:  0.003
   unit:   deg/s
   display_unit: rad/s (entered as deg/s)
   symbol: b_g
-  status: PLACEHOLDER — uncalibrated bias
-  what:   Constant yaw-gyro zero offset.
-  need:   IMU datasheet numbers
-  how:    Chosen IMU's spec sheet, then a stationary calibration on the car
+  status: PLACEHOLDER — VN-100 in-run bias stability (~10 deg/hr) from memory; VERIFY, then calibrate on the car
+  what:   Constant yaw-gyro zero offset left after the VN-100's own calibration.
+  need:   Stationary log on the car
+  how:    VN-100 datasheet bias stability, then a stationary calibration on the car
   why:    Biases the yaw-rate error the TV controller integrates.
 
 lpf_hz:
@@ -43,13 +43,13 @@ lpf_hz:
 
 accel_noise_std:
   label:  "IMU accel noise"
-  value:  0.05
+  value:  0.01
   unit:   m/s^2
   symbol: sigma_a
-  status: PLACEHOLDER — IMU spec
-  what:   Accelerometer 1-sigma noise (ax, ay channels).
-  need:   IMU datasheet
-  how:    Spec sheet
+  status: PLACEHOLDER — VN-100 datasheet value from memory (0.14 mg/sqrt(Hz) x sqrt(50 Hz)); VERIFY
+  what:   Accelerometer 1-sigma noise per 100 Hz sample (ax, ay channels). The car's IMU is a VN-100 (team sensor slide 75).
+  need:   Confirm the VN-100 accel noise density on its datasheet
+  how:    "VN-100 datasheet: noise density x sqrt(VCU bandwidth)"
   why:    Feeds future estimation (vx observer, validation logging).
 
 # ── full plant (vehicle17.py): the accelerometer bias state and the mount ───

@@ -18,13 +18,16 @@ about: >
 
 rate_hz:
   label:  "GPS update rate"
-  value:  20.0
+  value:  10.0
   unit:   Hz
   symbol: f_gps
-  status: PLACEHOLDER — receiver datasheet
-  what:   How often each receiver produces a new speed.
-  need:   Receiver datasheet / configured rate
-  how:    Datasheet
+  status: CURRENT CAR (MoTeC GPS-L10, team sensor slide 79)
+  what: >
+    How often each receiver produces a new speed. SR-17 carries ONE GPS-L10;
+    the model's second receiver (and its bias state) is the DOF doc's
+    provision, not fitted hardware.
+  need:   "-"
+  how:    "Sensor slide 79 (MoTeC GPS-L10 datasheet: 10 Hz)"
   why:    Held between updates; sets how stale the speed the VCU holds can be.
 
 latency:

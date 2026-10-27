@@ -144,7 +144,7 @@ Generated from the `params.yaml` files — regenerate with `.venv/bin/python par
 | `sensors.gps.bias_walk` | `model/sensors/gps/params.yaml` | PLACEHOLDER |
 | `sensors.gps.can_scale` | `model/sensors/gps/params.yaml` | CURRENT CAR |
 | `sensors.gps.latency` | `model/sensors/gps/params.yaml` | PLACEHOLDER |
-| `sensors.gps.rate_hz` | `model/sensors/gps/params.yaml` | PLACEHOLDER |
+| `sensors.gps.rate_hz` | `model/sensors/gps/params.yaml` | CURRENT CAR |
 | `sensors.gps.speed_noise_std` | `model/sensors/gps/params.yaml` | PLACEHOLDER |
 | `sensors.imu_6axis.accel_bias_walk` | `model/sensors/imu_6axis/params.yaml` | PLACEHOLDER |
 | `sensors.imu_6axis.accel_noise_std` | `model/sensors/imu_6axis/params.yaml` | PLACEHOLDER |
