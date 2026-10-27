@@ -124,6 +124,18 @@ class TrackDriver:
         self.t_unwind_start = None
         self.integ = 0.0
         self.t_last = None
+        self._model = getattr(self, "_model", None)
+
+    def bind(self, model):
+        """sim.py hands over the plant so the driver can read speed and
+        heading without knowing the state layout (planar vs full)."""
+        self._model = model
+
+    def _speed_heading(self, s):
+        if self._model is not None:
+            _, _, psi, vx, _, _, _ = self._model.state_view(s)
+            return vx, psi
+        return s[IVX], s[IPSI]
 
     # feed-forward: aero drag at the hold speed
     def _T_ff(self, v):
@@ -140,8 +152,8 @@ class TrackDriver:
         dt = 0.0 if self.t_last is None else t - self.t_last
         self.t_last = t
 
-        vx = s[IVX]
-        psi = self.dir * s[IPSI]
+        vx, psi = self._speed_heading(s)
+        psi *= self.dir
 
         # steering
         delta = _ramp(t, self.t_in, self.t_in + self.t_turnin, 0.0, self.delta_c)
@@ -263,9 +275,11 @@ def model_for(maneuver, base_model: VehicleModel) -> VehicleModel:
     patch = getattr(maneuver, "mu_patch", None)
     if not patch:
         return base_model
-    tires = list(base_model.tires)
+    # both plants expose their MagicFormulaTire set (the full plant wraps
+    # them in transient tires, so it keeps the originals in mf_tires)
+    tires = list(getattr(base_model, "mf_tires", base_model.tires))
     for idx, scale in patch.items():
         tp = tires[idx].p
         tires[idx] = MagicFormulaTire(replace(tp, mu0=tp.mu0 * scale,
                                               mu0x=tp.mu0x * scale))
-    return VehicleModel(base_model.p, tires[0], tires[2], tires=tuple(tires))
+    return base_model.with_tires(tuple(tires))

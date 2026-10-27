@@ -1,0 +1,223 @@
+namespace: battery
+order: 46
+title: "BATTERY — 3-zone equivalent-circuit model (full plant)"
+
+about: >
+  The accumulator in the full plant: three series zones, each a cell-level
+  2-RC equivalent circuit scaled by the cells in series per zone and the
+  parallel count. Per zone: SOC, V1 (fast RC) and V2 (slow RC) — 9 of the
+  80 states. The pack current is solved algebraically each step from the
+  four motors' electrical power and the pack's open-circuit voltage and
+  resistance (a quadratic, no iteration).
+
+  Per cell:   dSOC/dt = -eta_c I_c / Q_cap
+              dV1/dt  = -V1/(R1 C1) + I_c/C1
+              dV2/dt  = -V2/(R2 C2) + I_c/C2
+              V_cell  = OCV(SOC) - I_c R0(T) - V1 - V2
+  Zone        V_zone  = n_series_per_zone x V_cell
+  Pack        I       = sum(P_motor) / V_pack,   I_c = I / cells_parallel
+
+  The OCV curve and the resistance/RC values are the cell datasheet plus
+  one HPPC pulse test. Until then every entry is a PLACEHOLDER shaped like
+  a generic NMC cell. OCV is a straight line between ocv_at_empty and
+  ocv_at_full; replace with the datasheet curve when the loader grows a
+  table type.
+
+cells_series:
+  label:  "Cells in series"
+  value:  96
+  unit:   "-"
+  symbol: n_s
+  status: PLACEHOLDER — 380 V / 3.96 V nominal
+  what:   Series cell count of the pack. Split evenly across the three zones.
+  need:   Pack topology
+  how:    Accumulator design
+  why:    Pack voltage = n_s x cell voltage.
+
+cells_parallel:
+  label:  "Cells in parallel"
+  value:  3
+  unit:   "-"
+  symbol: n_p
+  status: PLACEHOLDER — accumulator design
+  what:   Parallel cell count per series group.
+  need:   Pack topology
+  how:    Accumulator design
+  why:    Cell current = pack current / n_p; sets sag and heating per cell.
+
+zones:
+  label:  "Thermal/electrical zones"
+  value:  3
+  unit:   "-"
+  symbol: n_z
+  status: CONSTANT (model structure)
+  what:   Number of series zones the pack is split into so a hot spot can appear. The model is written for 3.
+  need:   "-"
+  how:    "-"
+  why:    "The DOF doc's 3-zone model: 9 electrical + 6 thermal states."
+
+capacity_cell:
+  label:  "Cell capacity"
+  value:  5.0
+  unit:   Ah
+  symbol: Q_cap
+  status: PLACEHOLDER — cell datasheet
+  what:   Rated capacity of one cell.
+  need:   Cell datasheet
+  how:    Datasheet, or a C/5 discharge test
+  why:    How fast SOC falls for a given current.
+
+coulombic_efficiency:
+  label:  "Coulombic efficiency"
+  value:  0.99
+  unit:   "-"
+  symbol: eta_c
+  status: PLACEHOLDER — typical Li-ion
+  what:   Charge actually stored per charge delivered.
+  need:   Datasheet
+  how:    Datasheet
+  why:    Second-order on SOC.
+
+ocv_at_empty:
+  label:  "OCV at 0% SOC"
+  value:  3.0
+  unit:   V
+  symbol: OCV_0
+  status: PLACEHOLDER — generic NMC
+  what:   Open-circuit cell voltage at SOC = 0 (linear OCV placeholder).
+  need:   Datasheet OCV curve
+  how:    Datasheet, or slow discharge with rest periods
+  why:    Pack voltage at a given SOC.
+
+ocv_at_full:
+  label:  "OCV at 100% SOC"
+  value:  4.2
+  unit:   V
+  symbol: OCV_1
+  status: PLACEHOLDER — generic NMC
+  what:   Open-circuit cell voltage at SOC = 1.
+  need:   Datasheet OCV curve
+  how:    Datasheet
+  why:    Pack voltage at full charge.
+
+r0_ref:
+  label:  "Cell ohmic resistance at 25 C"
+  value:  10.0
+  unit:   mohm
+  symbol: R0
+  status: PLACEHOLDER — HPPC test
+  what:   Instantaneous internal resistance of one cell at the reference temperature.
+  need:   HPPC pulse test (instant voltage step / current step)
+  how:    HPPC at several SOC and temperatures
+  why:    Voltage sag under load — lowers the motors' torque ceiling at speed — and I^2 R heating.
+
+r0_tempco:
+  label:  "R0 temperature coefficient"
+  value:  -0.01
+  unit:   1/K
+  symbol: dR0_dT
+  status: PLACEHOLDER — ~-1%/K typical Li-ion
+  what:   "Fractional change of R0 per kelvin above 25 C (negative: warm cells have less resistance)."
+  need:   HPPC at two temperatures
+  how:    HPPC
+  why:    The hot-spot feedback the 3-zone model exists to show (hotter zone, lower R, more current share... and vice versa).
+
+r1:
+  label:  "Fast RC resistance"
+  value:  5.0
+  unit:   mohm
+  symbol: R1
+  status: PLACEHOLDER — HPPC fit
+  what:   Resistance of the fast polarisation branch (per cell).
+  need:   HPPC relaxation fit
+  how:    Fit the first ~100 ms of the voltage relaxation after a pulse
+  why:    Sub-second voltage lag.
+
+c1:
+  label:  "Fast RC capacitance"
+  value:  20.0
+  unit:   F
+  symbol: C1
+  status: PLACEHOLDER — R1 C1 = 0.1 s
+  what:   Capacitance of the fast branch (per cell).
+  need:   HPPC fit
+  how:    Same fit
+  why:    Time constant of the fast branch.
+
+r2:
+  label:  "Slow RC resistance"
+  value:  8.0
+  unit:   mohm
+  symbol: R2
+  status: PLACEHOLDER — HPPC fit
+  what:   Resistance of the slow polarisation branch (per cell).
+  need:   HPPC relaxation fit
+  how:    Fit the seconds-scale tail of the relaxation
+  why:    Seconds-scale voltage lag (a lap's worth of sag build-up).
+
+c2:
+  label:  "Slow RC capacitance"
+  value:  1000.0
+  unit:   F
+  symbol: C2
+  status: PLACEHOLDER — R2 C2 = 8 s
+  what:   Capacitance of the slow branch (per cell).
+  need:   HPPC fit
+  how:    Same fit
+  why:    Time constant of the slow branch.
+
+v_cell_min:
+  label:  "Cell minimum voltage"
+  value:  2.8
+  unit:   V
+  symbol: V_min
+  status: PLACEHOLDER — cell datasheet
+  what:   Lowest allowed cell terminal voltage. The model scales discharge power down as any zone approaches it.
+  need:   Datasheet
+  how:    Datasheet
+  why:    Where the BMS cuts power on a flat pack.
+
+v_cell_max:
+  label:  "Cell maximum voltage"
+  value:  4.2
+  unit:   V
+  symbol: V_max
+  status: PLACEHOLDER — cell datasheet
+  what:   Highest allowed cell terminal voltage. Caps regen on a full pack.
+  need:   Datasheet
+  how:    Datasheet
+  why:    Where the BMS cuts regen.
+
+i_discharge_max_cell:
+  label:  "Max discharge current per cell"
+  value:  100.0
+  unit:   A
+  symbol: I_dis
+  status: PLACEHOLDER — cell datasheet / BMS config
+  what:   Continuous discharge current limit of one cell. Pack limit = x cells_parallel.
+  need:   Datasheet and the BMS setting
+  how:    Datasheet, BMS config
+  why:    Caps total drive power from the pack side (with the 80 kW rule).
+
+i_charge_max_cell:
+  label:  "Max charge current per cell"
+  value:  30.0
+  unit:   A
+  symbol: I_chg
+  status: PLACEHOLDER — cell datasheet / BMS config
+  what:   Continuous charge (regen) current limit of one cell.
+  need:   Datasheet and the BMS setting
+  how:    Datasheet, BMS config
+  why:    Caps regen from the pack side.
+
+soc_initial:
+  label:  "Initial SOC"
+  value:  0.9
+  unit:   "-"
+  display_unit: fraction (0-1)
+  symbol: SOC_0
+  status: PLACEHOLDER — scenario choice
+  what:   State of charge every zone starts a run at.
+  need:   "-"
+  how:    Pick per test
+  why:    Pack voltage, hence the torque ceiling, at the start of the run.

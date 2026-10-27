@@ -29,6 +29,12 @@ class WheelSpeedSensor:
         The wheel speed returned is the one the VCU computes back from the
         QUANTIZED motor rpm — not the truth it started from.
         """
-        rpm = omega_wheel * self.gear_ratio / RPM
+        return self.read_motor(omega_wheel * self.gear_ratio)
+
+    def read_motor(self, omega_motor: float):
+        """True MOTOR shaft speed [rad/s] → (motor rpm reported, wheel speed
+        [rad/s]). What the resolver measures; the full plant has a rotor
+        state, the planar plant hands over ω_wheel × gear."""
+        rpm = omega_motor / RPM
         rpm = quant(rpm, self.quant_rpm)
         return rpm, rpm * RPM / self.gear_ratio

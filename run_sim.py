@@ -9,7 +9,8 @@ provenance tags, and an explicit CHANGES.md saying what moved since the
 previous run and what did not. See runlog.py.
 
 Usage:
-    python run_sim.py                          # everything, auto-labeled
+    python run_sim.py                          # everything, auto-labeled, full 17-DOF plant
+    python run_sim.py --plant planar           # the 10-state two-track reference plant
     python run_sim.py -l "ttc-tires" -n "first real tire fit"
     python run_sim.py --maneuver corner_exit   # one maneuver
     python run_sim.py --no-animate             # skip the videos (faster)
@@ -26,9 +27,10 @@ import numpy as np
 import matplotlib
 
 from model.config import cfg
-from model.params import default_setup, G
+from model.params import default_setup, full_setup, G
 from model.physical.tires.tire import MagicFormulaTire
 from model.physical.vehicle import VehicleModel
+from model.physical.vehicle17 import FullVehicleModel, NSTATES17, STATE_BLOCKS
 from sil.vcu_sil import make_configs
 from model.maneuvers.maneuvers import step_steer, corner_exit, slalom, pedal_check
 from model.maneuvers.tracks import track_maneuvers, model_for, CORNER_TYPES
@@ -313,6 +315,10 @@ def main():
                              "pedal_check", "tracks"],
                     help="'all' = the four scripted maneuvers; 'tracks' = "
                          "the corner test matrix (tracks.py)")
+    ap.add_argument("--plant", default="full", choices=["full", "planar"],
+                    help="'full' = the 17-DOF / 80-state plant "
+                         "(model/physical/vehicle17.py, default); 'planar' = "
+                         "the 10-state two-track reference plant (vehicle.py)")
     tg = ap.add_argument_group("track tests (--maneuver tracks)")
     tg.add_argument("--track", nargs="*", default=["all"],
                     metavar="TYPE",
@@ -365,8 +371,13 @@ def main():
     plt.rcParams.update(RC)
 
     # all numbers come from the params.yaml files (via model/config.py)
-    vp, tp_f, tp_r = default_setup()
-    model = VehicleModel(vp, MagicFormulaTire(tp_f), MagicFormulaTire(tp_r))
+    if args.plant == "full":
+        vp, fp, tp_f, tp_r = full_setup()
+        model = FullVehicleModel(vp, fp, MagicFormulaTire(tp_f),
+                                 MagicFormulaTire(tp_r))
+    else:
+        vp, tp_f, tp_r = default_setup()
+        model = VehicleModel(vp, MagicFormulaTire(tp_f), MagicFormulaTire(tp_r))
     maneuvers = build_maneuvers(args, vp,
                                 interactive=args.ask and sys.stdin.isatty())
     # the firmware is the controller: build it (or confirm it is current)
@@ -391,7 +402,9 @@ def main():
                                     args.maneuver, "replay_fps": args.fps,
                                     "animated": bool(args.animate),
                                     "controller": "VCU firmware (SIL)",
-                                    "vcu_rate_hz": cfg.sensors.vcu.rate_hz})
+                                    "vcu_rate_hz": cfg.sensors.vcu.rate_hz,
+                                    "plant": args.plant,
+                                    "plant_states": model.nstates})
     run_dir = rec.begin(maneuvers, config_names)
 
     print("SJSU Spartan Racing — software-diff basic sim")
@@ -399,6 +412,13 @@ def main():
           f"peak wheel torque {vp.T_wheel_max:.0f} N·m/side"
           "  (sources/tags: the params.yaml files)")
     print(f"  configs: {' | '.join(config_names)}")
+    if args.plant == "full":
+        blocks = ", ".join(f"{n} {k}" for k, n in STATE_BLOCKS)
+        print(f"  plant: FULL — 17 DOF, {NSTATES17} states ({blocks}); "
+              f"{sum(1 for p_ in cfg.params() if cfg.tag_of(p_) == 'PLACEHOLDER')} "
+              f"of {len(cfg.params())} parameters are PLACEHOLDERS (param_sheet.py lists them)")
+    else:
+        print(f"  plant: PLANAR reference — 3 DOF + 4 wheel spins, {model.nstates} states")
     print(f"  controller: VCU firmware, software-in-the-loop, reading the "
           f"sensor stack (WSS/IMU/SAS/APPS/BPS) at {cfg.sensors.vcu.rate_hz:g} Hz")
     print(f"  100% pedal = {vp.T_drive_max:.0f} N·m total "

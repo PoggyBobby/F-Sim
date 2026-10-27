@@ -1,0 +1,163 @@
+namespace: brakes
+order: 48
+title: "BRAKES — hydraulic lag + friction torque (full plant)"
+
+about: >
+  Mechanical brakes, modelled in the full plant only. Two pressure states
+  (front and rear line, 2 of the 80) follow the driver's pedal pressure
+  through a first-order lag, and the friction torque at each wheel is
+  algebraic from the pressure:
+
+      dP/dt = (P_cmd - P) / tau
+      T_b   = P * A_p * mu_pad * R_eff * N_surfaces
+
+  The driver's BPS reading (sensors/brake_pressure_sens) is taken as the
+  FRONT line pressure; the rear line is scaled by the balance bar. Pressing
+  the pedal therefore does two things, as on the car: hydraulic braking
+  here, and the firmware's regen request through the BPS.
+
+  The planar plant has no mechanical brakes (BPS commands regen only).
+
+bias_front:
+  label:  "Brake bias (front share)"
+  value:  0.6
+  unit:   "-"
+  display_unit: fraction (0-1)
+  symbol: b_f
+  status: PLACEHOLDER — balance-bar setting
+  what:   Share of total pedal effort sent to the front circuit. Rear line pressure = front x (1 - b_f) / b_f.
+  need:   Balance-bar position, or measured front/rear pressures
+  how:    Two pressure sensors on one pedal stomp
+  why:    Which axle locks first.
+
+pedal_ratio:
+  label:  "Pedal ratio"
+  value:  4.5
+  unit:   "-"
+  symbol: PR
+  status: PLACEHOLDER — CAD
+  what:   Pedal lever ratio (foot travel / master-cylinder travel). Recorded for the pedal-force-to-pressure chain; the sim is driven by pressure.
+  need:   Pedal geometry
+  how:    CAD
+  why:    Converts a driver's pedal force into line pressure when a log only has pedal force.
+
+master_cyl_bore_front:
+  label:  "Front master-cylinder bore"
+  value:  15.9
+  unit:   mm
+  symbol: d_mc_f
+  status: PLACEHOLDER — 5/8 in typical
+  what:   "Front master-cylinder piston diameter. Same role as pedal_ratio: pedal force -> pressure."
+  need:   Part number
+  how:    Part spec
+  why:    Pedal force to pressure.
+
+master_cyl_bore_rear:
+  label:  "Rear master-cylinder bore"
+  value:  17.8
+  unit:   mm
+  symbol: d_mc_r
+  status: PLACEHOLDER — 0.7 in typical
+  what:   Rear master-cylinder piston diameter.
+  need:   Part number
+  how:    Part spec
+  why:    Pedal force to pressure.
+
+piston_area_front:
+  label:  "Front caliper piston area (one side)"
+  value:  982.0
+  unit:   mm^2
+  symbol: A_pf
+  status: PLACEHOLDER — 2 x 25 mm pistons
+  what:   Total piston area on one side of a front caliper.
+  need:   Caliper spec
+  how:    Caliper datasheet
+  why:    Clamp force = pressure x area.
+
+piston_area_rear:
+  label:  "Rear caliper piston area (one side)"
+  value:  491.0
+  unit:   mm^2
+  symbol: A_pr
+  status: PLACEHOLDER — 1 x 25 mm piston
+  what:   Total piston area on one side of a rear caliper.
+  need:   Caliper spec
+  how:    Caliper datasheet
+  why:    Rear clamp force.
+
+pad_mu:
+  label:  "Pad friction coefficient"
+  value:  0.45
+  unit:   "-"
+  symbol: mu_pad
+  status: PLACEHOLDER — pad spec
+  what:   Pad-on-rotor friction coefficient (warm).
+  need:   Pad compound spec
+  how:    Pad datasheet
+  why:    Clamp force to brake torque.
+
+r_eff_front:
+  label:  "Front effective rotor radius"
+  value:  0.09
+  unit:   m
+  symbol: R_eff_f
+  status: PLACEHOLDER — CAD
+  what:   Mean radius of the front pad contact on the rotor.
+  need:   Rotor and pad dimensions
+  how:    "CAD: (outer + inner pad radius) / 2"
+  why:    Clamp force to torque.
+
+r_eff_rear:
+  label:  "Rear effective rotor radius"
+  value:  0.085
+  unit:   m
+  symbol: R_eff_r
+  status: PLACEHOLDER — CAD
+  what:   Mean radius of the rear pad contact.
+  need:   Rotor and pad dimensions
+  how:    CAD
+  why:    Rear clamp force to torque.
+
+n_surfaces:
+  label:  "Friction surfaces per caliper"
+  value:  2
+  unit:   "-"
+  symbol: N_s
+  status: CONSTANT (physical)
+  what:   Two pads per rotor.
+  need:   "-"
+  how:    "-"
+  why:    Torque = clamp x mu x R x 2.
+
+tau_front:
+  label:  "Front hydraulic time constant"
+  value:  15.0
+  unit:   ms
+  symbol: tau_f
+  status: PLACEHOLDER — bench estimate
+  what:   First-order lag between pedal pressure and front line pressure.
+  need:   Pressure-sensor step response from a log
+  how:    Stomp test with the pressure sensor logged at >= 500 Hz
+  why:    Brake lag; the regen request has none, so the two arrive at different times.
+
+tau_rear:
+  label:  "Rear hydraulic time constant"
+  value:  15.0
+  unit:   ms
+  symbol: tau_r
+  status: PLACEHOLDER — bench estimate
+  what:   Same as tau_front, rear line.
+  need:   Rear pressure step response
+  how:    Stomp test
+  why:    Rear brake lag.
+
+p_max:
+  label:  "Max line pressure"
+  value:  60.0
+  unit:   bar
+  symbol: P_max
+  status: PLACEHOLDER — pedal-stomp log
+  what:   Front line pressure at a full pedal stomp. Clips the commanded pressure.
+  need:   Measured max pressure
+  how:    Pedal-stomp log
+  why:    What 100% brake means.

@@ -51,3 +51,49 @@ accel_noise_std:
   need:   IMU datasheet
   how:    Spec sheet
   why:    Feeds future estimation (vx observer, validation logging).
+
+# ── full plant (vehicle17.py): the accelerometer bias state and the mount ───
+
+accel_bias_walk:
+  label:  "Accelerometer bias random walk"
+  value:  0.001
+  unit:   m/s^2/sqrt(s)
+  symbol: q_ax
+  status: PLACEHOLDER — "super accurate" assumption
+  what:   Strength of the slowly wandering longitudinal-accelerometer bias (one of the 80 plant states).
+  need:   Allan deviation from a static log
+  how:    Static log of the IMU for ~10 minutes
+  why:    The bias the EKF estimates; integrates into speed-estimate drift.
+
+pos_x:
+  label:  "IMU x (from CG)"
+  value:  0.0
+  unit:   m
+  symbol: x_imu
+  status: PLACEHOLDER — CAD
+  what:   IMU position relative to the CG, positive forward. The accelerometer measures the specific force AT the IMU, not at the CG.
+  need:   IMU mounting position
+  how:    CAD
+  why:    An IMU ahead of the CG reads yaw acceleration as lateral acceleration.
+
+pos_y:
+  label:  "IMU y (from CG)"
+  value:  0.0
+  unit:   m
+  symbol: y_imu
+  status: PLACEHOLDER — CAD
+  what:   IMU position relative to the CG, positive left.
+  need:   IMU mounting position
+  how:    CAD
+  why:    "Off-centre: yaw acceleration appears as longitudinal acceleration."
+
+pos_z:
+  label:  "IMU z (from CG)"
+  value:  0.1
+  unit:   m
+  symbol: z_imu
+  status: PLACEHOLDER — CAD
+  what:   IMU height relative to the CG, positive up.
+  need:   IMU mounting position
+  how:    CAD
+  why:    Above the CG the IMU reads roll acceleration as lateral acceleration.

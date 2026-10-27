@@ -61,3 +61,38 @@ total:
   need:   "—"
   how:    = m_car + m_driver
   why:    The mass every inertial term in the equations of motion uses.
+
+# ── full plant (vehicle17.py): sprung / unsprung split ──────────────────────
+
+unsprung_front:
+  label:  "Unsprung mass, front corner"
+  value:  7.05
+  unit:   kg
+  symbol: m_uf
+  status: PLACEHOLDER — team sheet (which car is unconfirmed)
+  what:   "Mass of ONE front corner that moves with the wheel: tire, rim, hub, upright, motor, planetary, brake, half the links."
+  need:   Front corner unsprung mass
+  how:    Weigh the assembled upright with wheel, or CAD mass properties
+  why:    The jounce DOF's mass; with the tire spring it sets the wheel-hop frequency.
+
+unsprung_rear:
+  label:  "Unsprung mass, rear corner"
+  value:  9.14
+  unit:   kg
+  symbol: m_ur
+  status: PLACEHOLDER — back-solved from the team sheet (total - sprung - 2 x front) / 2
+  what:   Mass of ONE rear corner that moves with the wheel.
+  need:   Rear corner unsprung mass
+  how:    Weigh the assembled upright with wheel, or CAD
+  why:    Rear jounce DOF mass.
+
+sprung:
+  label:  "Sprung mass (with driver)"
+  derived: mass.car_no_driver + mass.driver - 2.0 * mass.unsprung_front - 2.0 * mass.unsprung_rear
+  unit:   kg
+  symbol: m_s
+  status: DERIVED
+  what:   "The chassis body the 6-DOF equations move: total mass minus the four unsprung corners."
+  need:   "-"
+  how:    = total - 2 m_uf - 2 m_ur, never entered directly
+  why:    The mass that rolls, pitches and heaves on the springs.

@@ -1,0 +1,184 @@
+namespace: motors
+order: 45
+title: "MOTORS & INVERTERS — rotor, shaft compliance, command path (full plant)"
+
+about: >
+  The motor/drivetrain block of the full plant: per corner a rotor speed
+  state and a shaft-twist state (8 of the 80), the inverter's command path
+  (current ramp, latency, torque-speed clamp) and the losses. The motor's
+  peak torque, peak power, max speed, Kt and the firmware current cap stay
+  in drivetrain/params.yaml — this file only ADDS what the compliance and
+  inverter model need.
+
+  The inverters are VESC-based (current command in mA, status frames with
+  ERPM / current / DC voltage / IGBT and motor temperature). Most of this
+  file is read straight off the VESC Tool configuration export (.xml) of
+  each motor: pole pairs, current limits, ramp, flux linkage (-> Kt).
+  Ask for the four .xml files.
+
+  Per corner:   theta_s = theta_m / G - theta_w          (shaft twist)
+                T_s     = k_s theta_s + c_s dtheta_s/dt   (torque at the wheel)
+                J_m domega_m/dt = T_e - T_s / G - T_loss(omega_m)
+
+pole_pairs:
+  label:  "Motor pole pairs"
+  value:  5
+  unit:   "-"
+  symbol: p
+  status: PLACEHOLDER — AMK DD5 has 5; confirm from the VESC .xml
+  what:   Number of rotor pole pairs. ERPM = pole_pairs x mechanical rpm.
+  need:   Pole pairs of the in-hub motor
+  how:    VESC Tool motor settings / motor datasheet
+  why:    Converts the VESC's ERPM status to wheel speed, and Kt = 1.5 x p x flux linkage.
+
+rotor_inertia:
+  label:  "Rotor inertia"
+  value:  2.74e-4
+  unit:   kg*m^2
+  symbol: J_m
+  status: PLACEHOLDER — AMK A2370DD datasheet; in-hub motor unknown
+  what:   Inertia of the motor rotor about its own axis (motor side of the gearbox).
+  need:   Rotor inertia of the fitted motor
+  how:    Motor datasheet
+  why: >
+    Reflected through the gear ratio squared it is comparable to the wheel's
+    own inertia, so it sets how fast an unloaded wheel spins up — the whole
+    s-diff problem.
+
+gearbox_inertia_wheel_side:
+  label:  "Gearbox inertia (wheel side)"
+  value:  0.01
+  unit:   kg*m^2
+  symbol: J_g
+  status: PLACEHOLDER — CAD
+  what:   Rotating inertia of the planetary's carrier/output, referred to the wheel. Added to the wheel's spin inertia.
+  need:   Planetary output inertia
+  how:    CAD mass properties
+  why:    A few % of the wheel inertia.
+
+gearbox_efficiency:
+  label:  "Gearbox efficiency"
+  value:  0.97
+  unit:   "-"
+  symbol: eta_g
+  status: PLACEHOLDER — typical single-stage planetary
+  what:   Mechanical efficiency of the upright planetary. Applied as a loss torque at the motor proportional to |T_s|/G.
+  need:   Planetary efficiency
+  how:    Spec sheet, or dyno (motor power in vs wheel power out)
+  why:    3% of every torque is heat, and it is where the rules' 80 kW (electrical) differs from wheel power.
+
+shaft_stiffness:
+  label:  "Output shaft torsional stiffness"
+  value:  20000.0
+  unit:   N*m/rad
+  symbol: k_s
+  status: PLACEHOLDER — short in-hub output shaft estimate
+  what:   Torsional stiffness between the planetary output and the wheel.
+  need:   Output shaft / hub stiffness
+  how:    CAD/FEA (G J / L of the shaft), or lock the wheel and twist the motor with a torque wrench + encoder
+  why: >
+    With the wheel and reflected rotor inertias it sets the driveline's
+    natural frequency (~100 Hz here). A torque step rings at that frequency —
+    the "driveline shudder" the DOF doc wants represented.
+
+shaft_damping:
+  label:  "Output shaft torsional damping"
+  value:  5.0
+  unit:   N*m*s/rad
+  symbol: c_s
+  status: PLACEHOLDER — ~5% of critical
+  what:   Damping of the shaft twist.
+  need:   Measured decay of a driveline oscillation
+  how:    Hammer test / log a torque step and fit the ring-down
+  why:    How many cycles a torque step rings for.
+
+backlash:
+  label:  "Driveline backlash"
+  value:  0.0
+  unit:   deg
+  symbol: theta_bl
+  status: PLACEHOLDER — assumed none
+  what:   Total angular play at the wheel across which the shaft carries no torque.
+  need:   Backlash at the wheel
+  how:    Lock the motor, rock the wheel with a dial gauge
+  why:    A torque reversal (regen to drive) crosses the backlash with a clunk — a small torque dead-zone.
+
+loss_coulomb:
+  label:  "Motor friction torque"
+  value:  0.05
+  unit:   N*m
+  symbol: T_f
+  status: PLACEHOLDER — bearing/seal drag estimate
+  what:   Speed-independent drag torque at the motor shaft (bearings, seals).
+  need:   No-load drag
+  how:    Spin-down test, or VESC no-load current x Kt
+  why:    Part of the coast-down.
+
+loss_viscous:
+  label:  "Motor viscous loss"
+  value:  1.0e-5
+  unit:   N*m/(rad/s)
+  symbol: b_m
+  status: PLACEHOLDER — windage estimate
+  what:   Drag torque per rad/s of rotor speed (windage, iron losses as a torque).
+  need:   No-load loss vs speed
+  how:    Spin-down test at several speeds
+  why:    Coast-down at speed.
+
+efficiency:
+  label:  "Motor + inverter efficiency"
+  value:  0.92
+  unit:   "-"
+  symbol: eta_m
+  status: PLACEHOLDER — constant in place of the efficiency map
+  what: >
+    Electrical-to-mechanical efficiency used for the pack current:
+    P_elec = T_e omega_m / eta when driving, T_e omega_m x eta under regen.
+    A constant until a measured map eta(T, omega) replaces it.
+  need:   Efficiency map, or at least a few points
+  how:    "Dyno: electrical power in (VESC input current x DC voltage) vs mechanical power out"
+  why:    What the pack sees for a given wheel torque — battery current, sag and heating.
+
+regen_torque_max:
+  label:  "Max regen torque (motor side)"
+  value:  21.0
+  unit:   N*m
+  symbol: T_regen
+  status: PLACEHOLDER — set to the motor's peak; VESC brake-current limit decides
+  what:   Largest negative (regen) torque one motor may produce, at its shaft.
+  need:   VESC brake current max x Kt, and the BMS charge limit
+  how:    VESC .xml (l_current_min / brake current), BMS config
+  why:    Lift-off mid-corner is a torque split too; this caps it.
+
+current_ramp:
+  label:  "Inverter current ramp limit"
+  value:  2000.0
+  unit:   A/s
+  symbol: dI_max
+  status: PLACEHOLDER — fast enough to be invisible at the VCU rate
+  what:   Fastest the commanded motor current may change. Applied per VCU cycle (A/s x cycle time).
+  need:   The VESC's configured ramp (app / motor settings)
+  how:    VESC .xml
+  why:    A slow ramp delays every torque split by a few VCU cycles.
+
+command_latency:
+  label:  "Command latency (CAN to torque)"
+  value:  10.0
+  unit:   ms
+  symbol: t_lat
+  status: PLACEHOLDER — one VCU cycle
+  what:   Delay between the VCU putting a current command on CAN and the motor producing that torque. Rounded to whole VCU cycles.
+  need:   Measured command-to-torque delay
+  how:    "Bench: step the CAN command, log VESC current; or compare VCU log vs IMU response"
+  why:    Dead time in the TV loop — the main thing that limits controller gain.
+
+v_bus_nominal:
+  label:  "Nominal bus voltage"
+  derived: drivetrain.pack_voltage
+  unit:   V
+  symbol: V_nom
+  status: DERIVED
+  what:   The voltage the motor_power_peak figure was derived for. Peak power scales with V_bus / V_nom as the pack sags.
+  need:   "-"
+  how:    = pack_voltage
+  why:    Lets the battery model's voltage sag lower the torque ceiling at speed.

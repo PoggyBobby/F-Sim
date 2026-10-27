@@ -14,7 +14,65 @@ Generated from the `params.yaml` files — regenerate with `.venv/bin/python par
 | `aero.balance_front` | `model/physical/aero/params.yaml` | PLACEHOLDER |
 | `aero.cd_coeff` | `model/physical/aero/params.yaml` | FROM REPORT |
 | `aero.cl_coeff` | `model/physical/aero/params.yaml` | FROM REPORT |
+| `aero.cop_height` | `model/physical/aero/params.yaml` | PLACEHOLDER |
 | `aero.frontal_area` | `model/physical/aero/params.yaml` | FROM REPORT |
+| `aero.ride_height_sensitivity` | `model/physical/aero/params.yaml` | PLACEHOLDER |
+| `battery.c1` | `model/physical/battery/params.yaml` | PLACEHOLDER |
+| `battery.c2` | `model/physical/battery/params.yaml` | PLACEHOLDER |
+| `battery.capacity_cell` | `model/physical/battery/params.yaml` | PLACEHOLDER |
+| `battery.cells_parallel` | `model/physical/battery/params.yaml` | PLACEHOLDER |
+| `battery.cells_series` | `model/physical/battery/params.yaml` | PLACEHOLDER |
+| `battery.coulombic_efficiency` | `model/physical/battery/params.yaml` | PLACEHOLDER |
+| `battery.i_charge_max_cell` | `model/physical/battery/params.yaml` | PLACEHOLDER |
+| `battery.i_discharge_max_cell` | `model/physical/battery/params.yaml` | PLACEHOLDER |
+| `battery.ocv_at_empty` | `model/physical/battery/params.yaml` | PLACEHOLDER |
+| `battery.ocv_at_full` | `model/physical/battery/params.yaml` | PLACEHOLDER |
+| `battery.r0_ref` | `model/physical/battery/params.yaml` | PLACEHOLDER |
+| `battery.r0_tempco` | `model/physical/battery/params.yaml` | PLACEHOLDER |
+| `battery.r1` | `model/physical/battery/params.yaml` | PLACEHOLDER |
+| `battery.r2` | `model/physical/battery/params.yaml` | PLACEHOLDER |
+| `battery.soc_initial` | `model/physical/battery/params.yaml` | PLACEHOLDER |
+| `battery.v_cell_max` | `model/physical/battery/params.yaml` | PLACEHOLDER |
+| `battery.v_cell_min` | `model/physical/battery/params.yaml` | PLACEHOLDER |
+| `battery.zones` | `model/physical/battery/params.yaml` | CONSTANT |
+| `battery_thermal.c_coolant` | `model/physical/battery_thermal/params.yaml` | PLACEHOLDER |
+| `battery_thermal.c_core` | `model/physical/battery_thermal/params.yaml` | PLACEHOLDER |
+| `battery_thermal.c_surface` | `model/physical/battery_thermal/params.yaml` | PLACEHOLDER |
+| `battery_thermal.derate_end` | `model/physical/battery_thermal/params.yaml` | PLACEHOLDER |
+| `battery_thermal.derate_start` | `model/physical/battery_thermal/params.yaml` | PLACEHOLDER |
+| `battery_thermal.hot_spot_factor` | `model/physical/battery_thermal/params.yaml` | PLACEHOLDER |
+| `battery_thermal.r_core_surface` | `model/physical/battery_thermal/params.yaml` | PLACEHOLDER |
+| `battery_thermal.r_surface_coolant` | `model/physical/battery_thermal/params.yaml` | PLACEHOLDER |
+| `battery_thermal.t_initial` | `model/physical/battery_thermal/params.yaml` | DERIVED |
+| `battery_thermal.ua_radiator` | `model/physical/battery_thermal/params.yaml` | PLACEHOLDER |
+| `brakes.bias_front` | `model/physical/brakes/params.yaml` | PLACEHOLDER |
+| `brakes.master_cyl_bore_front` | `model/physical/brakes/params.yaml` | PLACEHOLDER |
+| `brakes.master_cyl_bore_rear` | `model/physical/brakes/params.yaml` | PLACEHOLDER |
+| `brakes.n_surfaces` | `model/physical/brakes/params.yaml` | CONSTANT |
+| `brakes.p_max` | `model/physical/brakes/params.yaml` | PLACEHOLDER |
+| `brakes.pad_mu` | `model/physical/brakes/params.yaml` | PLACEHOLDER |
+| `brakes.pedal_ratio` | `model/physical/brakes/params.yaml` | PLACEHOLDER |
+| `brakes.piston_area_front` | `model/physical/brakes/params.yaml` | PLACEHOLDER |
+| `brakes.piston_area_rear` | `model/physical/brakes/params.yaml` | PLACEHOLDER |
+| `brakes.r_eff_front` | `model/physical/brakes/params.yaml` | PLACEHOLDER |
+| `brakes.r_eff_rear` | `model/physical/brakes/params.yaml` | PLACEHOLDER |
+| `brakes.tau_front` | `model/physical/brakes/params.yaml` | PLACEHOLDER |
+| `brakes.tau_rear` | `model/physical/brakes/params.yaml` | PLACEHOLDER |
+| `dampers.bw_A` | `model/physical/dampers/params.yaml` | PLACEHOLDER |
+| `dampers.bw_beta` | `model/physical/dampers/params.yaml` | PLACEHOLDER |
+| `dampers.bw_gamma` | `model/physical/dampers/params.yaml` | PLACEHOLDER |
+| `dampers.bw_n` | `model/physical/dampers/params.yaml` | PLACEHOLDER |
+| `dampers.c_bump_high_front` | `model/physical/dampers/params.yaml` | PLACEHOLDER |
+| `dampers.c_bump_high_rear` | `model/physical/dampers/params.yaml` | PLACEHOLDER |
+| `dampers.c_bump_low_front` | `model/physical/dampers/params.yaml` | PLACEHOLDER |
+| `dampers.c_bump_low_rear` | `model/physical/dampers/params.yaml` | PLACEHOLDER |
+| `dampers.c_rebound_high_front` | `model/physical/dampers/params.yaml` | PLACEHOLDER |
+| `dampers.c_rebound_high_rear` | `model/physical/dampers/params.yaml` | PLACEHOLDER |
+| `dampers.c_rebound_low_front` | `model/physical/dampers/params.yaml` | PLACEHOLDER |
+| `dampers.c_rebound_low_rear` | `model/physical/dampers/params.yaml` | PLACEHOLDER |
+| `dampers.gas_spring_rate` | `model/physical/dampers/params.yaml` | PLACEHOLDER |
+| `dampers.hysteresis_gain` | `model/physical/dampers/params.yaml` | PLACEHOLDER |
+| `dampers.knee_velocity` | `model/physical/dampers/params.yaml` | PLACEHOLDER |
 | `drivetrain.I_wheel_front` | `model/physical/drivetrain/params.yaml` | DERIVED |
 | `drivetrain.I_wheel_rear` | `model/physical/drivetrain/params.yaml` | DERIVED |
 | `drivetrain.driven_wheels` | `model/physical/drivetrain/params.yaml` | CURRENT CAR |
@@ -30,9 +88,22 @@ Generated from the `params.yaml` files — regenerate with `.venv/bin/python par
 | `drivetrain.tire_outer_diameter` | `model/physical/drivetrain/params.yaml` | CURRENT CAR |
 | `drivetrain.wheel_radius` | `model/physical/drivetrain/params.yaml` | CURRENT CAR |
 | `environment.g` | `model/physical/environment/params.yaml` | CONSTANT |
+| `environment.p_ambient` | `model/physical/environment/params.yaml` | PLACEHOLDER |
 | `environment.rho_air` | `model/physical/environment/params.yaml` | FROM REPORT |
+| `environment.road_bank` | `model/physical/environment/params.yaml` | PLACEHOLDER |
+| `environment.road_grade` | `model/physical/environment/params.yaml` | PLACEHOLDER |
+| `environment.t_ambient` | `model/physical/environment/params.yaml` | PLACEHOLDER |
+| `environment.wind_direction` | `model/physical/environment/params.yaml` | PLACEHOLDER |
+| `environment.wind_speed` | `model/physical/environment/params.yaml` | PLACEHOLDER |
+| `geometry.I_xx` | `model/physical/geometry/params.yaml` | PLACEHOLDER |
+| `geometry.I_xz` | `model/physical/geometry/params.yaml` | PLACEHOLDER |
+| `geometry.I_yy` | `model/physical/geometry/params.yaml` | PLACEHOLDER |
 | `geometry.I_z` | `model/physical/geometry/params.yaml` | FROM REPORT |
+| `geometry.cg_lateral_offset` | `model/physical/geometry/params.yaml` | MEASURED |
 | `geometry.h_cg` | `model/physical/geometry/params.yaml` | FROM REPORT |
+| `geometry.h_cg_sprung` | `model/physical/geometry/params.yaml` | DERIVED |
+| `geometry.ride_height_front` | `model/physical/geometry/params.yaml` | PLACEHOLDER |
+| `geometry.ride_height_rear` | `model/physical/geometry/params.yaml` | PLACEHOLDER |
 | `geometry.track_front` | `model/physical/geometry/params.yaml` | FROM REPORT |
 | `geometry.track_rear` | `model/physical/geometry/params.yaml` | FROM REPORT |
 | `geometry.weight_fraction_front` | `model/physical/geometry/params.yaml` | MEASURED |
@@ -42,17 +113,47 @@ Generated from the `params.yaml` files — regenerate with `.venv/bin/python par
 | `loads.spring_rate_rear` | `model/physical/loads/params.yaml` | FROM REPORT |
 | `mass.car_no_driver` | `model/physical/mass/params.yaml` | MEASURED |
 | `mass.driver` | `model/physical/mass/params.yaml` | CURRENT CAR |
+| `mass.sprung` | `model/physical/mass/params.yaml` | DERIVED |
 | `mass.total` | `model/physical/mass/params.yaml` | DERIVED |
+| `mass.unsprung_front` | `model/physical/mass/params.yaml` | PLACEHOLDER |
+| `mass.unsprung_rear` | `model/physical/mass/params.yaml` | PLACEHOLDER |
+| `motors.backlash` | `model/physical/motors/params.yaml` | PLACEHOLDER |
+| `motors.command_latency` | `model/physical/motors/params.yaml` | PLACEHOLDER |
+| `motors.current_ramp` | `model/physical/motors/params.yaml` | PLACEHOLDER |
+| `motors.efficiency` | `model/physical/motors/params.yaml` | PLACEHOLDER |
+| `motors.gearbox_efficiency` | `model/physical/motors/params.yaml` | PLACEHOLDER |
+| `motors.gearbox_inertia_wheel_side` | `model/physical/motors/params.yaml` | PLACEHOLDER |
+| `motors.loss_coulomb` | `model/physical/motors/params.yaml` | PLACEHOLDER |
+| `motors.loss_viscous` | `model/physical/motors/params.yaml` | PLACEHOLDER |
+| `motors.pole_pairs` | `model/physical/motors/params.yaml` | PLACEHOLDER |
+| `motors.regen_torque_max` | `model/physical/motors/params.yaml` | PLACEHOLDER |
+| `motors.rotor_inertia` | `model/physical/motors/params.yaml` | PLACEHOLDER |
+| `motors.shaft_damping` | `model/physical/motors/params.yaml` | PLACEHOLDER |
+| `motors.shaft_stiffness` | `model/physical/motors/params.yaml` | PLACEHOLDER |
+| `motors.v_bus_nominal` | `model/physical/motors/params.yaml` | DERIVED |
 | `numerical.v_eps` | `model/physical/numerical/params.yaml` | NUMERICAL GUARD |
+| `numerical.v_smooth` | `model/physical/numerical/params.yaml` | NUMERICAL GUARD |
 | `numerical.w_eps` | `model/physical/numerical/params.yaml` | NUMERICAL GUARD |
+| `numerical.w_smooth` | `model/physical/numerical/params.yaml` | NUMERICAL GUARD |
 | `sensors.brake_pressure_sens.actuated_bar` | `model/sensors/brake_pressure_sens/params.yaml` | PLACEHOLDER |
 | `sensors.brake_pressure_sens.quant_bar` | `model/sensors/brake_pressure_sens/params.yaml` | PLACEHOLDER |
 | `sensors.brake_pressure_sens.range_bar` | `model/sensors/brake_pressure_sens/params.yaml` | PLACEHOLDER |
 | `sensors.brake_pressure_sens.t_regen_max` | `model/sensors/brake_pressure_sens/params.yaml` | PLACEHOLDER |
+| `sensors.gps.antenna_x` | `model/sensors/gps/params.yaml` | PLACEHOLDER |
+| `sensors.gps.antenna_y` | `model/sensors/gps/params.yaml` | PLACEHOLDER |
+| `sensors.gps.bias_walk` | `model/sensors/gps/params.yaml` | PLACEHOLDER |
+| `sensors.gps.can_scale` | `model/sensors/gps/params.yaml` | CURRENT CAR |
+| `sensors.gps.latency` | `model/sensors/gps/params.yaml` | PLACEHOLDER |
+| `sensors.gps.rate_hz` | `model/sensors/gps/params.yaml` | PLACEHOLDER |
+| `sensors.gps.speed_noise_std` | `model/sensors/gps/params.yaml` | PLACEHOLDER |
+| `sensors.imu_6axis.accel_bias_walk` | `model/sensors/imu_6axis/params.yaml` | PLACEHOLDER |
 | `sensors.imu_6axis.accel_noise_std` | `model/sensors/imu_6axis/params.yaml` | PLACEHOLDER |
 | `sensors.imu_6axis.gyro_bias` | `model/sensors/imu_6axis/params.yaml` | PLACEHOLDER |
 | `sensors.imu_6axis.gyro_noise_std` | `model/sensors/imu_6axis/params.yaml` | PLACEHOLDER |
 | `sensors.imu_6axis.lpf_hz` | `model/sensors/imu_6axis/params.yaml` | PLACEHOLDER |
+| `sensors.imu_6axis.pos_x` | `model/sensors/imu_6axis/params.yaml` | PLACEHOLDER |
+| `sensors.imu_6axis.pos_y` | `model/sensors/imu_6axis/params.yaml` | PLACEHOLDER |
+| `sensors.imu_6axis.pos_z` | `model/sensors/imu_6axis/params.yaml` | PLACEHOLDER |
 | `sensors.steering_angle.map_a0` | `model/sensors/steering_angle/params.yaml` | CURRENT CAR |
 | `sensors.steering_angle.map_a1` | `model/sensors/steering_angle/params.yaml` | CURRENT CAR |
 | `sensors.steering_angle.map_a2` | `model/sensors/steering_angle/params.yaml` | CURRENT CAR |
@@ -67,19 +168,69 @@ Generated from the `params.yaml` files — regenerate with `.venv/bin/python par
 | `sensors.wheel_speed.quant_rpm` | `model/sensors/wheel_speed/params.yaml` | PLACEHOLDER |
 | `sil.boot_s` | `sil/params.yaml` | PLACEHOLDER |
 | `steering.ackermann_fraction` | `model/physical/steering/params.yaml` | PLACEHOLDER |
+| `steering.c_factor` | `model/physical/steering/params.yaml` | PLACEHOLDER |
+| `steering.caster` | `model/physical/steering/params.yaml` | PLACEHOLDER |
+| `steering.column_stiffness` | `model/physical/steering/params.yaml` | PLACEHOLDER |
+| `steering.knuckle_damping` | `model/physical/steering/params.yaml` | PLACEHOLDER |
+| `steering.knuckle_inertia` | `model/physical/steering/params.yaml` | PLACEHOLDER |
+| `steering.kpi` | `model/physical/steering/params.yaml` | PLACEHOLDER |
+| `steering.mechanical_trail` | `model/physical/steering/params.yaml` | DERIVED |
+| `steering.rack_damping` | `model/physical/steering/params.yaml` | PLACEHOLDER |
+| `steering.rack_friction` | `model/physical/steering/params.yaml` | PLACEHOLDER |
+| `steering.rack_mass` | `model/physical/steering/params.yaml` | PLACEHOLDER |
+| `steering.rack_travel_max` | `model/physical/steering/params.yaml` | PLACEHOLDER |
+| `steering.scrub_radius` | `model/physical/steering/params.yaml` | PLACEHOLDER |
+| `steering.tierod_stiffness` | `model/physical/steering/params.yaml` | PLACEHOLDER |
+| `suspension.anti_dive` | `model/physical/suspension/params.yaml` | PLACEHOLDER |
+| `suspension.anti_squat` | `model/physical/suspension/params.yaml` | PLACEHOLDER |
+| `suspension.arb_rate_front` | `model/physical/suspension/params.yaml` | PLACEHOLDER |
+| `suspension.arb_rate_rear` | `model/physical/suspension/params.yaml` | PLACEHOLDER |
+| `suspension.bump_steer_front` | `model/physical/suspension/params.yaml` | PLACEHOLDER |
+| `suspension.bump_steer_rear` | `model/physical/suspension/params.yaml` | PLACEHOLDER |
+| `suspension.bump_stop_gap_front` | `model/physical/suspension/params.yaml` | PLACEHOLDER |
+| `suspension.bump_stop_gap_rear` | `model/physical/suspension/params.yaml` | PLACEHOLDER |
+| `suspension.bump_stop_rate` | `model/physical/suspension/params.yaml` | PLACEHOLDER |
+| `suspension.camber_gain_bump_front` | `model/physical/suspension/params.yaml` | PLACEHOLDER |
+| `suspension.camber_gain_bump_rear` | `model/physical/suspension/params.yaml` | PLACEHOLDER |
+| `suspension.camber_gain_roll_front` | `model/physical/suspension/params.yaml` | PLACEHOLDER |
+| `suspension.camber_gain_roll_rear` | `model/physical/suspension/params.yaml` | PLACEHOLDER |
+| `suspension.camber_static_front` | `model/physical/suspension/params.yaml` | PLACEHOLDER |
+| `suspension.camber_static_rear` | `model/physical/suspension/params.yaml` | PLACEHOLDER |
+| `suspension.motion_ratio_front` | `model/physical/suspension/params.yaml` | PLACEHOLDER |
+| `suspension.motion_ratio_rear` | `model/physical/suspension/params.yaml` | PLACEHOLDER |
+| `suspension.roll_center_height_front` | `model/physical/suspension/params.yaml` | PLACEHOLDER |
+| `suspension.roll_center_height_rear` | `model/physical/suspension/params.yaml` | PLACEHOLDER |
+| `suspension.toe_static_front` | `model/physical/suspension/params.yaml` | PLACEHOLDER |
+| `suspension.toe_static_rear` | `model/physical/suspension/params.yaml` | PLACEHOLDER |
+| `suspension.travel_jounce_front` | `model/physical/suspension/params.yaml` | PLACEHOLDER |
+| `suspension.travel_jounce_rear` | `model/physical/suspension/params.yaml` | PLACEHOLDER |
+| `suspension.travel_rebound_front` | `model/physical/suspension/params.yaml` | PLACEHOLDER |
+| `suspension.travel_rebound_rear` | `model/physical/suspension/params.yaml` | PLACEHOLDER |
+| `suspension.unsprung_cg_height` | `model/physical/suspension/params.yaml` | DERIVED |
+| `suspension.wheel_rate_front` | `model/physical/suspension/params.yaml` | DERIVED |
+| `suspension.wheel_rate_rear` | `model/physical/suspension/params.yaml` | DERIVED |
 | `tires.Fz_nom` | `model/physical/tires/params.yaml` | DERIVED |
 | `tires.belt_mu_lat` | `model/physical/tires/params.yaml` | TTC FIT |
 | `tires.belt_mu_long` | `model/physical/tires/params.yaml` | TTC FIT |
 | `tires.c_alpha_front` | `model/physical/tires/params.yaml` | TTC FIT |
 | `tires.c_alpha_rear` | `model/physical/tires/params.yaml` | TTC FIT |
 | `tires.c_kappa` | `model/physical/tires/params.yaml` | TTC FIT |
+| `tires.c_vertical` | `model/physical/tires/params.yaml` | PLACEHOLDER |
+| `tires.camber_stiffness` | `model/physical/tires/params.yaml` | PLACEHOLDER |
 | `tires.curv_e_lat` | `model/physical/tires/params.yaml` | TTC FIT |
 | `tires.curv_e_long` | `model/physical/tires/params.yaml` | TTC FIT |
+| `tires.k_vertical` | `model/physical/tires/params.yaml` | PLACEHOLDER |
 | `tires.mu0` | `model/physical/tires/params.yaml` | TTC FIT |
 | `tires.mu0_long` | `model/physical/tires/params.yaml` | TTC FIT |
 | `tires.mu_road_scale` | `model/physical/tires/params.yaml` | PLACEHOLDER |
+| `tires.pneumatic_trail_0` | `model/physical/tires/params.yaml` | PLACEHOLDER |
+| `tires.rolling_resistance` | `model/physical/tires/params.yaml` | PLACEHOLDER |
 | `tires.s_mu` | `model/physical/tires/params.yaml` | TTC FIT |
 | `tires.shape_c_lat` | `model/physical/tires/params.yaml` | TTC FIT |
 | `tires.shape_c_long` | `model/physical/tires/params.yaml` | TTC FIT |
+| `tires.sigma_alpha` | `model/physical/tires/params.yaml` | PLACEHOLDER |
+| `tires.sigma_kappa` | `model/physical/tires/params.yaml` | PLACEHOLDER |
+| `tires.sigma_mz` | `model/physical/tires/params.yaml` | PLACEHOLDER |
+| `tires.trail_slip_angle` | `model/physical/tires/params.yaml` | PLACEHOLDER |
 
 <!-- END PARAM TABLE -->

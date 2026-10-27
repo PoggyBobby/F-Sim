@@ -133,6 +133,9 @@ def free_rolling_omegas(model, s, delta: float):
 
 
 class VehicleModel:
+    nstates = NSTATES
+    is_full = False
+
     def __init__(self, p: VehicleParams, tire_front: MagicFormulaTire,
                  tire_rear: MagicFormulaTire, tires=None):
         self.p = p
@@ -280,3 +283,54 @@ class VehicleModel:
                 "Fx_w": w["Fx_w"], "Fy_w": w["Fy_w"],
                 "ax": ax, "ay": ay, "Mz": Mz}
         return ds, info
+
+    # ──────────────────────────────────── the plant interface sim.py uses
+    # (the same duck-type as vehicle17.FullVehicleModel, so the loop never
+    # indexes a state vector itself)
+    def with_tires(self, mf_tires):
+        """A copy of this plant on a different per-wheel tire set."""
+        return VehicleModel(self.p, mf_tires[0], mf_tires[2], tires=tuple(mf_tires))
+
+    def initial_state(self, vx0, delta0):
+        s = [0.0] * NSTATES
+        s[IVX] = vx0
+        for j, w0 in zip(IW, free_rolling_omegas(self, s, delta0)):
+            s[j] = w0
+        return s
+
+    def zero_input(self):
+        return (0.0, 0.0, 0.0, 0.0)
+
+    def plant_input(self, dbg, drv, dt_vcu):
+        """The planar plant is driven by wheel torques straight from the
+        controller (the SIL's Kt·G conversion and motor clip happen in
+        sil/vcu_sil.py for this plant)."""
+        return dbg.T
+
+    def state_view(self, s):
+        return (s[IX], s[IY], s[IPSI], s[IVX], s[IVY], s[IR],
+                tuple(s[j] for j in IW))
+
+    def sensor_truth(self, s, info):
+        """No pitch/roll, no bias states: ax/ay are ΣF/m, az is +g, the
+        motor shaft turns at gear_ratio × the wheel. Computed exactly as the
+        pre-refactor suite did (ω·gear) so planar runs stay bit-identical."""
+        from model.sensors.readings import SensorTruth
+        from model.config import cfg
+        g = cfg.sensors.gps
+        vx, vy, r = s[IVX], s[IVY], s[IR]
+        v_ant = (vx - r * g.antenna_y, vy + r * g.antenna_x)
+        return SensorTruth(
+            yaw_rate=r, p=0.0, q=0.0,
+            ax=info["ax"], ay=info["ay"], az=G,
+            omega_wheel=tuple(s[j] for j in IW),
+            omega_motor=tuple(s[j] * self.p.gear_ratio for j in IW),
+            v_ground=math.hypot(v_ant[0], v_ant[1]),
+            b_ax=0.0, b_gps=(0.0, 0.0), has_bias=False)
+
+    def apply_bias_walk(self, s, d_ax, d_gps):
+        pass                                     # no bias states on this plant
+
+    def diverged(self, s):
+        beta = abs(math.atan2(s[IVY], max(s[IVX], 0.5)))
+        return abs(s[IR]) > 8.0 or abs(s[IVY]) > 15.0 or beta > 1.0

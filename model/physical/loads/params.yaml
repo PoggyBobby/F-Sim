@@ -9,26 +9,27 @@ about: >
 spring_rate_front:
   label:  "Front spring rate"
   value:  19.3
-  unit:   "-"
-  display_unit: N/mm (ratio only)
+  unit:   N/mm
+  display_unit: N/m (entered as N/mm)
   symbol: ks_f
   status: FROM REPORT
-  what:   Front suspension spring rate. Used ONLY through its ratio to the rear.
+  what:   Front suspension spring rate. The planar plant uses only its ratio to the rear; the full plant's suspension/params.yaml derives the front wheel rate from it.
   need:   Front roll stiffness incl. ARBs and motion ratios
   how:    Suspension team
   why:    Numerator of the lateral load-transfer split.
   note: >
-    Report spring units say "N/m"; clearly N/mm. The RATIO is unit-independent,
-    which is all that is used here.
+    Report spring units say "N/m"; clearly N/mm (2026-10-22: unit set to N/mm
+    so the full plant can use the rate itself; the planar plant's ratio is
+    unchanged by the conversion).
 
 spring_rate_rear:
   label:  "Rear spring rate"
   value:  24.8
-  unit:   "-"
-  display_unit: N/mm (ratio only)
+  unit:   N/mm
+  display_unit: N/m (entered as N/mm)
   symbol: ks_r
   status: FROM REPORT
-  what:   Rear suspension spring rate. Used ONLY through its ratio to the front.
+  what:   Rear suspension spring rate. The planar plant uses only its ratio to the front; the full plant derives the rear wheel rate from it.
   need:   Rear roll stiffness incl. ARBs and motion ratios
   how:    Suspension team
   why:    Denominator half of the lateral load-transfer split.

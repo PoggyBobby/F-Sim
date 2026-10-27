@@ -142,6 +142,10 @@ class ControllerDebug:
     sim.py reads `.T`; verify.py's physics fixtures return one too."""
     T: tuple = (0.0, 0.0, 0.0, 0.0)
     dw_target: float = 0.0    # kinematic rear wheel-speed difference wRR-wRL [rad/s]
+    # the firmware's own command: motor current [A] FL FR RL RR. The full
+    # plant (vehicle17.py) drives its motor model from THIS and ignores T;
+    # None means "a torque-only fixture", and the plant derives T/(Kt·G).
+    I_cmd: tuple = None
 
     @property
     def T_FL(self) -> float:
@@ -248,7 +252,12 @@ class SilController:
         speeds = (sr.wheel_speed_FL, sr.wheel_speed_FR,
                   sr.wheel_speed_RL, sr.wheel_speed_RR)
         T = tuple(self._motor_clip(t, w) for t, w in zip(front + rear, speeds))
-        dbg = ControllerDebug(T=T)
+        # the raw current command [A], same mirroring, no clip: the full
+        # plant's motor model applies Kt, the torque-speed ceiling and the
+        # pack limits itself
+        I_rear = (cmd_RL / 1000.0, cmd_RR / 1000.0)
+        I_front = I_rear if self.vp.driven_wheels == 4 else (0.0, 0.0)
+        dbg = ControllerDebug(T=T, I_cmd=I_front + I_rear)
         dbg.dw_target = sr.yaw_rate * self.vp.track_r / self.vp.r_wheel   # diagnostic only
         return dbg
 

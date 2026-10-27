@@ -1,0 +1,188 @@
+namespace: dampers
+order: 73
+title: "DAMPERS — digressive curves + Bouc-Wen hysteresis state (full plant)"
+
+about: >
+  One damper per corner in the full plant. Force at the wheel:
+
+      F_d = c(v) * v  +  k0 * s  +  alpha * z_d
+
+  c(v) is bilinear and asymmetric: a low-speed slope up to the knee velocity
+  and a high-speed slope above it, separately for bump (compression, v > 0)
+  and rebound. k0 is the gas-spring term. z_d is the Bouc-Wen hysteresis
+  state (one per corner, 4 of the plant's 80 states):
+
+      dz/dt = A * v  -  beta * |v| * |z|^(n-1) * z  -  gamma * v * |z|^n
+
+  With alpha = 0 (the placeholder) the hysteresis is switched OFF and the
+  damper is exactly the bilinear curve — verify.py K checks that collapse.
+  Every number here comes from ONE damper-dyno sheet at the clicks the car
+  runs; the Bouc-Wen four (A, beta, gamma, n) are fitted to the dyno loop.
+
+  All values at the WHEEL (motion ratio applied). The sheet's single
+  "damping coefficient" per axle is used as the low-speed bump slope.
+
+c_bump_low_front:
+  label:  "Front bump damping, low speed"
+  value:  1934.6
+  unit:   N*s/m
+  symbol: c_bl_f
+  status: PLACEHOLDER — team sheet value, looks computed (~0.7 critical), not dyno
+  what:   Front compression damping below the knee velocity, at the wheel.
+  need:   Front damper dyno curve at the clicks run (bump side, low speed)
+  how:    Damper dyno sheet, slope of the bump trace below the knee
+  why:    Sets how fast load transfers on turn-in — the transient the s-diff reacts to.
+
+c_bump_high_front:
+  label:  "Front bump damping, high speed"
+  value:  970.0
+  unit:   N*s/m
+  symbol: c_bh_f
+  status: PLACEHOLDER — digressive assumption (half the low-speed slope)
+  what:   Front compression damping above the knee velocity.
+  need:   Dyno bump trace, high-speed slope
+  how:    Damper dyno sheet
+  why:    Kerb / bump response; small effect on smooth-track TV tests.
+
+c_rebound_low_front:
+  label:  "Front rebound damping, low speed"
+  value:  2900.0
+  unit:   N*s/m
+  symbol: c_rl_f
+  status: PLACEHOLDER — typical 1.5 x bump
+  what:   Front extension damping below the knee.
+  need:   Dyno rebound trace, low-speed slope
+  how:    Damper dyno sheet
+  why:    How fast the inner wheel's load comes back after the corner.
+
+c_rebound_high_front:
+  label:  "Front rebound damping, high speed"
+  value:  1450.0
+  unit:   N*s/m
+  symbol: c_rh_f
+  status: PLACEHOLDER — digressive assumption
+  what:   Front extension damping above the knee.
+  need:   Dyno rebound trace, high-speed slope
+  how:    Damper dyno sheet
+  why:    Rebound over bumps.
+
+c_bump_low_rear:
+  label:  "Rear bump damping, low speed"
+  value:  2667.0
+  unit:   N*s/m
+  symbol: c_bl_r
+  status: PLACEHOLDER — team sheet value, looks computed, not dyno
+  what:   Rear compression damping below the knee.
+  need:   Rear damper dyno curve, bump low speed
+  how:    Damper dyno sheet
+  why:    Rear load-transfer speed on corner exit.
+
+c_bump_high_rear:
+  label:  "Rear bump damping, high speed"
+  value:  1330.0
+  unit:   N*s/m
+  symbol: c_bh_r
+  status: PLACEHOLDER — digressive assumption
+  what:   Rear compression damping above the knee.
+  need:   Dyno bump trace, high speed
+  how:    Damper dyno sheet
+  why:    Rear bump response.
+
+c_rebound_low_rear:
+  label:  "Rear rebound damping, low speed"
+  value:  4000.0
+  unit:   N*s/m
+  symbol: c_rl_r
+  status: PLACEHOLDER — typical 1.5 x bump
+  what:   Rear extension damping below the knee.
+  need:   Dyno rebound trace, low speed
+  how:    Damper dyno sheet
+  why:    Rear load recovery after a corner.
+
+c_rebound_high_rear:
+  label:  "Rear rebound damping, high speed"
+  value:  2000.0
+  unit:   N*s/m
+  symbol: c_rh_r
+  status: PLACEHOLDER — digressive assumption
+  what:   Rear extension damping above the knee.
+  need:   Dyno rebound trace, high speed
+  how:    Damper dyno sheet
+  why:    Rear rebound over bumps.
+
+knee_velocity:
+  label:  "Damper knee velocity"
+  value:  0.05
+  unit:   m/s
+  symbol: v_knee
+  status: PLACEHOLDER — typical digressive knee
+  what:   Shaft velocity (at the wheel) where the damping slope changes from low- to high-speed.
+  need:   Knee from the dyno trace
+  how:    Damper dyno sheet
+  why:    Body motions in a corner are low-speed; bumps are high-speed. The knee separates them.
+
+gas_spring_rate:
+  label:  "Damper gas-spring rate"
+  value:  1000.0
+  unit:   N/m
+  symbol: k0
+  status: PLACEHOLDER — small gas-pressure term
+  what:   Spring-like force per metre of stroke from the damper's gas charge, at the wheel.
+  need:   Zero-velocity force vs stroke from the dyno
+  how:    Damper dyno sheet (force offset vs position)
+  why:    Adds a few % to the wheel rate.
+
+hysteresis_gain:
+  label:  "Bouc-Wen hysteresis gain"
+  value:  0.0
+  unit:   N
+  symbol: alpha
+  status: PLACEHOLDER — hysteresis OFF until a dyno loop is fitted
+  what:   Force contributed by the hysteresis state z_d (|z_d| <= 1). 0 switches the Bouc-Wen term off.
+  need:   Fit to the damper dyno force-velocity loop (the loop's width)
+  how:    Least-squares fit of F_d = c(v)v + k0 s + alpha z to the dyno loop
+  why:    The lag between shaft velocity and force — a few % of transient load transfer.
+
+bw_A:
+  label:  "Bouc-Wen A"
+  value:  1.0
+  unit:   "-"
+  symbol: A
+  status: PLACEHOLDER — unit-amplitude default
+  what:   Bouc-Wen drive gain in dz/dt = A v - beta |v| |z|^(n-1) z - gamma v |z|^n.
+  need:   Fit to the dyno loop
+  how:    Same fit as hysteresis_gain
+  why:    Sets the hysteresis loop's slope.
+
+bw_beta:
+  label:  "Bouc-Wen beta"
+  value:  0.5
+  unit:   "-"
+  symbol: beta
+  status: PLACEHOLDER — (beta + gamma = 1 bounds |z| at 1)
+  what:   Bouc-Wen shape parameter (symmetric decay).
+  need:   Fit to the dyno loop
+  how:    Same fit
+  why:    Loop shape.
+
+bw_gamma:
+  label:  "Bouc-Wen gamma"
+  value:  0.5
+  unit:   "-"
+  symbol: gamma
+  status: PLACEHOLDER
+  what:   Bouc-Wen shape parameter (asymmetric decay).
+  need:   Fit to the dyno loop
+  how:    Same fit
+  why:    Loop shape.
+
+bw_n:
+  label:  "Bouc-Wen exponent"
+  value:  1.0
+  unit:   "-"
+  symbol: n
+  status: PLACEHOLDER — n = 1 gives a smooth loop
+  what:   Bouc-Wen sharpness exponent (higher = sharper transition in the loop).
+  need:   Fit to the dyno loop
+  how:    Same fit
+  why:    Loop sharpness.

@@ -206,3 +206,104 @@ curv_e_long:
   need:   Post-peak behavior
   how:    TTC fit
   why:    How violently a spinning wheel loses force — feeds the wheelspin runaway.
+
+# ── full plant (vehicle17.py): carcass, transients, aligning moment, camber ─
+
+k_vertical:
+  label:  "Tire vertical stiffness"
+  value:  72152.0
+  unit:   N/m
+  symbol: k_t
+  status: PLACEHOLDER — team sheet (which car is unconfirmed)
+  what:   Vertical spring rate of the carcass at running pressure.
+  need:   Vertical stiffness at the running pressure
+  how:    TTC vertical-stiffness runs, or press test
+  why:    With the unsprung mass it sets wheel hop (~16 Hz); the tire's vertical force IS Fz.
+
+c_vertical:
+  label:  "Tire vertical damping"
+  value:  50.0
+  unit:   N*s/m
+  symbol: c_t
+  status: PLACEHOLDER — small; carcass damping
+  what:   Damping of the carcass spring.
+  need:   Drop test decay
+  how:    Drop test, or estimate
+  why:    Damps wheel hop.
+
+pneumatic_trail_0:
+  label:  "Pneumatic trail at zero slip"
+  value:  0.02
+  unit:   m
+  symbol: t_p0
+  status: PLACEHOLDER — fit tire_fit.py to the TTC Mz channel
+  what:   Distance behind the contact centre at which the lateral force acts, at small slip angles and nominal load. Scales with Fz/Fz_nom and falls to zero at trail_slip_angle.
+  need:   TTC aligning-moment fit
+  how:    tire_fit.py on the Round 9 Mz channel (not yet done)
+  why:    The aligning moment Mz = -t_p Fy that pulls the steering straight — and the knuckle DOF's main load.
+
+trail_slip_angle:
+  label:  "Slip angle where the trail vanishes"
+  value:  8.0
+  unit:   deg
+  symbol: alpha_t
+  status: PLACEHOLDER — TTC Mz fit
+  what:   Slip angle at which the pneumatic trail has fallen to zero (linear decay from t_p0).
+  need:   TTC aligning-moment fit
+  how:    tire_fit.py on the Mz channel
+  why:    Where the steering goes light at the limit.
+
+camber_stiffness:
+  label:  "Camber stiffness at nominal load"
+  value:  8.0
+  unit:   N/deg
+  symbol: C_gamma
+  status: PLACEHOLDER — TTC camber sweeps
+  what:   Lateral force per degree of camber at Fz_nom (scales with Fz). Positive = negative camber on a left wheel pushes it left... sign handled per side in the plant.
+  need:   TTC camber sweep fit
+  how:    tire_fit.py on the camber runs
+  why:    Camber thrust — a few % of lateral force at the setup camber.
+
+rolling_resistance:
+  label:  "Rolling-resistance coefficient"
+  value:  0.015
+  unit:   "-"
+  symbol: f_rr
+  status: PLACEHOLDER — coast-down log
+  what:   "Rolling-resistance moment per unit load per unit radius: T_rr = f_rr Fz r_w."
+  need:   Coast-down log at low speed (the speed-independent part of the deceleration)
+  how:    Coast-down test
+  why:    Part of every coast-down and of the hold torque in a corner.
+
+sigma_kappa:
+  label:  "Longitudinal relaxation length"
+  value:  0.3
+  unit:   m
+  symbol: sigma_k
+  status: PLACEHOLDER — typical for a 16-18 in FSAE tire
+  what:   Distance the tire rolls before its longitudinal force reaches 63% of a step change in slip ratio.
+  need:   TTC transient runs, or on-car step test
+  how:    tire_fit.py on transient data if Round 9 has it; else estimate
+  why:    Low-speed force lag — the reason a slip controller overshoots at corner-exit speeds.
+
+sigma_alpha:
+  label:  "Lateral relaxation length"
+  value:  0.5
+  unit:   m
+  symbol: sigma_a
+  status: PLACEHOLDER — typical
+  what:   Rolling distance to 63% of a step in slip angle.
+  need:   TTC transient runs
+  how:    tire_fit.py on transient data; else estimate
+  why:    Turn-in lag of the lateral force.
+
+sigma_mz:
+  label:  "Aligning-moment relaxation length"
+  value:  0.5
+  unit:   m
+  symbol: sigma_m
+  status: PLACEHOLDER — assumed = sigma_alpha
+  what:   Rolling distance to 63% of a step in aligning moment.
+  need:   TTC transient runs
+  how:    Estimate
+  why:    Lag of the steering's self-aligning torque.

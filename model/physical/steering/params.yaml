@@ -29,3 +29,160 @@ ackermann_fraction:
     ONE wheel's curve cannot give the Ackermann SPLIT — that is the DIFFERENCE
     between the two wheels, and the fit is not valid through x=0, so the right
     wheel cannot be mirror-derived. Until then the sim stays parallel-steer.
+
+# ── full plant (vehicle17.py): rack + two knuckle DOFs ──────────────────────
+# Three steering DOFs: the rack and each front knuckle, each with its own
+# inertia and a compliance to the rack. The handwheel-to-road-wheel MAP stays
+# in sensors/steering_angle/params.yaml; here the rack position is the
+# handwheel angle through c_factor, and the kinematic knuckle angle is the
+# map of that position with the Ackermann split applied.
+
+c_factor:
+  label:  "Rack c-factor"
+  value:  60.0
+  unit:   mm/rev
+  symbol: c_rack
+  status: PLACEHOLDER — rack spec
+  what:   Rack travel per handwheel revolution.
+  need:   Rack part spec
+  how:    Rack datasheet, or turn the wheel one turn and measure
+  why:    Handwheel angle -> rack displacement, the first steering DOF.
+
+rack_travel_max:
+  label:  "Rack travel (each way)"
+  value:  15.0
+  unit:   mm
+  symbol: q_max
+  status: PLACEHOLDER — CAD
+  what:   Rack displacement from centre to the stop.
+  need:   Rack stops
+  how:    CAD / measure lock to lock
+  why:    The steering lock.
+
+rack_mass:
+  label:  "Rack effective mass"
+  value:  2.5
+  unit:   kg
+  symbol: m_r
+  status: PLACEHOLDER — CAD
+  what:   Mass of the rack plus the column and handwheel inertia reflected to rack travel.
+  need:   Rack + column mass properties
+  how:    CAD
+  why:    The rack DOF's inertia.
+
+rack_friction:
+  label:  "Rack friction"
+  value:  20.0
+  unit:   N
+  symbol: F_fr
+  status: PLACEHOLDER — estimate
+  what:   Coulomb friction force opposing rack motion.
+  need:   Rack breakaway force
+  how:    Push the rack with a spring scale, wheels off the ground
+  why:    Steering dead-band and the knuckles' return.
+
+rack_damping:
+  label:  "Rack damping"
+  value:  200.0
+  unit:   N*s/m
+  symbol: c_r
+  status: PLACEHOLDER — keeps the rack DOF well damped
+  what:   Viscous damping on rack velocity.
+  need:   "-"
+  how:    Estimate; tune so the rack does not ring
+  why:    Numerical and physical damping of the rack DOF.
+
+column_stiffness:
+  label:  "Column torsional stiffness"
+  value:  150.0
+  unit:   N*m/rad
+  symbol: k_col
+  status: PLACEHOLDER — measure
+  what:   Torsional stiffness from the handwheel to the pinion (column, U-joints).
+  need:   Column stiffness
+  how:    Hold the rack, apply a torque wrench at the wheel, measure the angle
+  why:    The driver's handwheel does not move the rack instantly under load.
+
+tierod_stiffness:
+  label:  "Tie-rod / knuckle compliance"
+  value:  35.0
+  unit:   N*m/deg
+  symbol: k_delta
+  status: PLACEHOLDER — measure
+  what:   Torsional stiffness between the rack's kinematic wheel angle and the actual knuckle angle (tie rod, bearings, upright).
+  need:   Knuckle compliance under load
+  how:    Hold the rack, load the knuckle with a known moment, dial-gauge the angle
+  why:    Under aligning torque the wheel points less than the rack asks — compliance understeer.
+
+knuckle_inertia:
+  label:  "Knuckle inertia about the kingpin"
+  value:  0.06
+  unit:   kg*m^2
+  symbol: I_k
+  status: PLACEHOLDER — CAD
+  what:   Inertia of the wheel + upright + motor assembly about the steering axis.
+  need:   CAD mass properties about the kingpin axis
+  how:    CAD
+  why:    The knuckle DOF's inertia.
+
+knuckle_damping:
+  label:  "Knuckle damping"
+  value:  6.0
+  unit:   N*m*s/rad
+  symbol: c_k
+  status: PLACEHOLDER — set for a 0.27 damping ratio of the knuckle mode (2026-10-22)
+  what:   Viscous damping of the knuckle about the kingpin (bearings, ball joints, the tie-rod ends).
+  need:   Ring-down of a knuckle after a tap, wheels off the ground
+  how:    Hammer test with the SAS logged at >= 500 Hz; fit the decay
+  why: >
+    Decides whether the steering shimmies. The knuckle, the lagged lateral
+    force (relaxation length) and the trail form a feedback loop; at 1
+    N*m*s/rad the sim shimmied at 16 Hz (+/-0.3 deg of knuckle, 2% of extra
+    load transfer) for seconds after a step steer, and with a short
+    relaxation length it went unstable. 6 (zeta ~0.27 with the placeholder
+    inertia and tie-rod stiffness) damps it in a few cycles. A real
+    measurement replaces this.
+
+kpi:
+  label:  "Kingpin inclination"
+  value:  8.0
+  unit:   deg
+  symbol: KPI
+  status: PLACEHOLDER — kinematics
+  what:   Steering-axis inclination seen from the front.
+  need:   Kinematics / CAD
+  how:    Kinematics model
+  why:    Jacking and the steering's self-centring with lift; recorded, small effect.
+
+caster:
+  label:  "Caster"
+  value:  4.0
+  unit:   deg
+  symbol: caster
+  status: PLACEHOLDER — setup sheet
+  what:   Steering-axis inclination seen from the side (positive = top leaning back).
+  need:   Caster setting
+  how:    Caster gauge
+  why:    Mechanical trail = R x tan(caster), the lever the lateral force uses to turn the wheel back.
+
+scrub_radius:
+  label:  "Scrub radius"
+  value:  20.0
+  unit:   mm
+  symbol: r_scrub
+  status: PLACEHOLDER — CAD
+  what:   Lateral distance from the steering-axis ground intercept to the contact-patch centre.
+  need:   CAD
+  how:    CAD / kinematics
+  why:    Longitudinal force x scrub radius steers the wheel — torque steer from a left/right torque split.
+
+mechanical_trail:
+  label:  "Mechanical trail"
+  derived: drivetrain.wheel_radius * steering.caster
+  unit:   m
+  symbol: t_mech
+  status: DERIVED — small-angle R x caster
+  what:   Distance the contact patch trails the steering axis's ground intercept.
+  need:   "-"
+  how:    = R x tan(caster) (small angle)
+  why:    With the pneumatic trail, the arm of the aligning torque about the kingpin.

@@ -99,3 +99,82 @@ I_z:
   need:   Yaw moment of inertia
   how:    CAD mass model (practical) or trifilar pendulum test
   why:    Directly in Iz*rdot = sum(Mz) — how fast the car answers a yaw moment.
+
+# ── full plant (vehicle17.py): the other two inertias, CG split, ride heights ─
+
+I_xx:
+  label:  "Roll inertia (sprung)"
+  value:  15.34
+  unit:   kg*m^2
+  symbol: I_xx
+  status: PLACEHOLDER — team sheet (which car is unconfirmed)
+  what:   Roll moment of inertia of the SPRUNG mass about its own longitudinal axis.
+  need:   Roll inertia from CAD, driver included
+  how:    CAD mass properties
+  why:    How fast the body rolls after turn-in; with the roll stiffness it sets the roll natural frequency.
+
+I_yy:
+  label:  "Pitch inertia (sprung)"
+  value:  64.46
+  unit:   kg*m^2
+  symbol: I_yy
+  status: PLACEHOLDER — team sheet (which car is unconfirmed)
+  what:   Pitch moment of inertia of the sprung mass about its lateral axis.
+  need:   Pitch inertia from CAD
+  how:    CAD mass properties
+  why:    Dive/squat dynamics under braking and drive.
+
+I_xz:
+  label:  "Roll-yaw product of inertia"
+  value:  0.0
+  unit:   kg*m^2
+  symbol: I_xz
+  status: PLACEHOLDER — assumed 0 (symmetric body)
+  what:   Product of inertia coupling roll and yaw. Non-zero when the mass is not symmetric about the roll axis (a low-slung battery with a high driver gives a small one).
+  need:   I_xz from CAD
+  how:    CAD mass properties (full inertia tensor)
+  why:    "Couples roll into yaw: a body that rolls also yaws a little, which the TV controller sees as a disturbance."
+
+cg_lateral_offset:
+  label:  "CG lateral offset"
+  value:  0.0
+  unit:   m
+  symbol: y_cg
+  status: "MEASURED 2026-08-31 (corner scales: 50.56% left -> ~5 mm, taken as 0)"
+  what:   Lateral position of the CG from the centreline, positive LEFT.
+  need:   "-"
+  how:    "Corner scales: (left share - 0.5) x track"
+  why:    A non-zero value gives a standing left/right load asymmetry.
+
+h_cg_sprung:
+  label:  "Sprung-mass CG height"
+  derived: (mass.total * geometry.h_cg - 2.0 * (mass.unsprung_front + mass.unsprung_rear) * suspension.unsprung_cg_height) / mass.sprung
+  unit:   m
+  symbol: h_s
+  status: DERIVED
+  what:   Height of the SPRUNG mass's CG above ground, from the whole-vehicle h_cg and the unsprung CGs at wheel-centre height.
+  need:   "-"
+  how:    = (m_t h_cg - 4 m_u h_u) / m_s
+  why:    The lever arm for the elastic (through-the-springs) part of load transfer.
+
+ride_height_front:
+  label:  "Front static ride height"
+  value:  50.0
+  unit:   mm
+  symbol: rh_f
+  status: PLACEHOLDER — setup sheet
+  what:   Ground clearance at the front of the floor at static. Reference for the aero ride-height sensitivity.
+  need:   Setup-sheet ride height
+  how:    Ruler under the floor, car on flat ground, driver seated
+  why:    Aero platform; the full plant's heave is measured from this.
+
+ride_height_rear:
+  label:  "Rear static ride height"
+  value:  60.0
+  unit:   mm
+  symbol: rh_r
+  status: PLACEHOLDER — setup sheet
+  what:   Ground clearance at the rear of the floor at static.
+  need:   Setup-sheet ride height
+  how:    Ruler
+  why:    Aero platform (rake).

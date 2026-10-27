@@ -27,3 +27,71 @@ rho_air:
   need:   Ambient conditions on event days (optional refinement)
   how:    Weather data / altitude correction
   why:    Downforce and drag are 0.5*rho*(coeff*A)*v^2 — 5% density = 5% aero.
+
+# ── full plant (vehicle17.py) ────────────────────────────────────────────────
+
+t_ambient:
+  label:  "Ambient temperature"
+  value:  25.0
+  unit:   degC
+  symbol: T_amb
+  status: PLACEHOLDER — weather on the day
+  what:   Air temperature. Starts the battery at this temperature and is the coolant's heat sink.
+  need:   Weather at the test
+  how:    Thermometer / weather record
+  why:    Battery thermal state and derating.
+
+p_ambient:
+  label:  "Ambient pressure"
+  value:  101.325
+  unit:   kPa
+  symbol: p_amb
+  status: PLACEHOLDER — sea-level standard
+  what:   Air pressure. Recorded alongside rho_air; rho_air is the value the aero uses.
+  need:   Weather at the test
+  how:    Weather record / altimeter
+  why:    Air density, hence downforce and drag.
+
+wind_speed:
+  label:  "Wind speed"
+  value:  0.0
+  unit:   m/s
+  symbol: v_wind
+  status: PLACEHOLDER — calm
+  what:   Steady wind speed over the ground.
+  need:   Anemometer at the test
+  how:    Weather record
+  why:    Adds to the airspeed the aero forces see.
+
+wind_direction:
+  label:  "Wind direction (from)"
+  value:  0.0
+  unit:   deg
+  symbol: psi_wind
+  status: PLACEHOLDER — calm
+  what:   Direction the wind blows FROM, in the ground frame (0 = along +X, a headwind on a car heading +X).
+  need:   Wind direction at the test
+  how:    Weather record
+  why:    Headwind vs tailwind vs crosswind.
+
+road_grade:
+  label:  "Road grade"
+  value:  0.0
+  unit:   deg
+  symbol: grade
+  status: PLACEHOLDER — flat pad
+  what:   Uphill slope along +X (positive = climbing). Tilts gravity in the full plant.
+  need:   Track survey
+  how:    Inclinometer on the test surface
+  why:    g sin(grade) is a longitudinal force the controller cannot tell from drive torque.
+
+road_bank:
+  label:  "Road bank"
+  value:  0.0
+  unit:   deg
+  symbol: bank
+  status: PLACEHOLDER — flat pad
+  what:   Side slope (positive = left side higher). Tilts gravity in the full plant.
+  need:   Track survey
+  how:    Inclinometer
+  why:    Banking adds or removes lateral load.

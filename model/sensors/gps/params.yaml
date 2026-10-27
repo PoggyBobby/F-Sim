@@ -1,0 +1,94 @@
+namespace: sensors.gps
+order: 97
+title: "SENSORS — GPS ground speed (two receivers)"
+
+about: >
+  Two GPS receivers reporting ground speed over CAN (the DAQ frame the
+  firmware already parses in daqSensors.c, 0.001 km/h per LSB). Each has a
+  slowly wandering speed error carried as a plant state (2 of the 80 — the
+  DOF doc's "GPS speed error" biases) plus white noise, and reports at its
+  own rate with a latency.
+
+      speed_reported(t) = |V_ground|(t - latency) + b_k + n_k
+      b_{k+1} = b_k + w_k,  w_k ~ N(0, bias_walk^2 x dt)
+
+  Nothing in the current firmware (sdiff.c) reads GPS; it is here for the
+  slip controller work and for the vx-estimate comparison. "Super accurate,
+  minor noise" per the team: the placeholders are small.
+
+rate_hz:
+  label:  "GPS update rate"
+  value:  20.0
+  unit:   Hz
+  symbol: f_gps
+  status: PLACEHOLDER — receiver datasheet
+  what:   How often each receiver produces a new speed.
+  need:   Receiver datasheet / configured rate
+  how:    Datasheet
+  why:    Held between updates; sets how stale the speed the VCU holds can be.
+
+latency:
+  label:  "GPS latency"
+  value:  50.0
+  unit:   ms
+  symbol: t_gps
+  status: PLACEHOLDER — receiver datasheet
+  what:   Delay between the true speed and the reported one.
+  need:   Datasheet latency
+  how:    Datasheet, or compare against wheel speed on a step
+  why:    A late speed in a fast corner-exit is a wrong speed.
+
+speed_noise_std:
+  label:  "GPS speed noise (1 sigma)"
+  value:  0.05
+  unit:   m/s
+  symbol: sigma_gps
+  status: PLACEHOLDER — "super accurate" assumption
+  what:   White noise on each reported speed.
+  need:   Static log of the receiver
+  how:    Park the car, log speed for a minute, take the standard deviation
+  why:    Noise on any slip ratio computed from it.
+
+bias_walk:
+  label:  "GPS speed-error random walk"
+  value:  0.01
+  unit:   m/s/sqrt(s)
+  symbol: q_gps
+  status: PLACEHOLDER — small drift
+  what:   Strength of the slowly wandering speed error (random-walk intensity).
+  need:   Long static log (Allan deviation)
+  how:    Static log, Allan deviation at ~10 s
+  why:    The error the EKF has to estimate.
+
+can_scale:
+  label:  "GPS CAN resolution"
+  value:  0.001
+  unit:   km/h
+  symbol: LSB_gps
+  status: CURRENT CAR (daqSensors.c)
+  what:   km/h per LSB of the DAQ GPS speed frame.
+  need:   "-"
+  how:    dev/daqSensors.c in the firmware
+  why:    Quantisation of the reported speed.
+
+antenna_x:
+  label:  "GPS antenna x (from CG)"
+  value:  0.0
+  unit:   m
+  symbol: x_gps
+  status: PLACEHOLDER — CAD
+  what:   Longitudinal position of the antenna relative to the CG (positive forward).
+  need:   Antenna position
+  how:    CAD / tape
+  why:    In a corner the antenna's speed differs from the CG's by yaw rate x offset.
+
+antenna_y:
+  label:  "GPS antenna y (from CG)"
+  value:  0.0
+  unit:   m
+  symbol: y_gps
+  status: PLACEHOLDER — CAD
+  what:   Lateral position of the antenna relative to the CG (positive left).
+  need:   Antenna position
+  how:    CAD
+  why:    Same as antenna_x.

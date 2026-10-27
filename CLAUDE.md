@@ -15,13 +15,15 @@ The repo is **private** and cannot be made public as-is — see `docs/PUBLISHING
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 git submodule update --init sil/SRE-VCU   # REQUIRED: the firmware is the controller (built automatically)
 
-# the audit — physics plus the firmware against its own sdiff.c; the check
-# count is printed at the end (96 checks, ~40 s at the time of writing); exit 1
-# on any failure
+# the audit — physics (both plants) plus the firmware against its own sdiff.c;
+# the check count is printed at the end (139 checks, ~2 min at the time of
+# writing); exit 1 on any failure
 .venv/bin/python verify.py
 
-# the sim (defaults to all four scripted maneuvers, both firmware configs)
+# the sim (defaults to all four scripted maneuvers, both firmware configs,
+# on the full 17-DOF plant)
 .venv/bin/python run_sim.py --no-animate          # skip video
+.venv/bin/python run_sim.py --plant planar --no-animate   # the 10-state reference plant
 .venv/bin/python run_sim.py --maneuver step_steer --no-animate
 .venv/bin/python run_sim.py --maneuver tracks --track 90deg --no-animate
 
@@ -73,7 +75,7 @@ sequence, including the two other artifacts the same edit invalidates
 .venv/bin/python -c "import verify; verify.section_a()"
 ```
 
-Sections: A tire model · B vertical loads · C slip kinematics · D EOM & integration · E vs bicycle model · F VCU firmware vs its own `sdiff.c` · G in-run audit (firmware in the loop) · I sensor stack. D and E drive the plant through `EqualTorque`, a fixture inside `verify.py` that reads the true state — closed-form answers need exact torques, and the firmware is only reachable through the noisy sensor stack. It is test scaffolding, not a configuration.
+Sections: A tire model · B vertical loads · C slip kinematics · D EOM & integration · E vs bicycle model · F VCU firmware vs its own `sdiff.c` · G in-run audit (firmware in the loop) · I sensor stack · J–N the full plant (chassis · suspension & dampers · tire transients & steering · motors, battery, thermal, brakes · vs planar + firmware in the loop). D, E and J–N drive the plant through `EqualTorque` / `EqualTorqueFull`, fixtures inside `verify.py` that read the true state — closed-form answers need exact torques, and the firmware is only reachable through the noisy sensor stack. They are test scaffolding, not configurations.
 
 ## Architecture
 
@@ -96,9 +98,34 @@ Sections: A tire model · B vertical loads · C slip kinematics · D EOM & integ
 
 ### The plant
 
-`model/physical/vehicle.py` — planar two-track, 10 states, **all four wheels driven**: `derivatives(s, delta, T_wheel)` takes four wheel torques in FL, FR, RL, RR order and a rear-drive car is simply zero on the fronts. There is no drive-layout flag in the plant. Mechanical braking is still not modelled — the BPS commands regen only, through the motors, so what AWD added is regen on four wheels rather than braking.
+`model/physical/vehicle.py` — the **planar reference plant** (`run_sim.py --plant planar`): two-track, 10 states, **all four wheels driven**: `derivatives(s, delta, T_wheel)` takes four wheel torques in FL, FR, RL, RR order and a rear-drive car is simply zero on the fronts. There is no drive-layout flag in the plant. Mechanical braking is not modelled on THIS plant — the BPS commands regen only, through the motors (the full plant below has hydraulic brakes).
 
   A front wheel is no longer massless. The old free-roller matched ground speed instantly and made no longitudinal force; a real spin state lags its contact-patch speed, so the fronts now make force in every transient — 2·I_w/r_w² = 13.4 kg of apparent mass, 5.3% of the car. `verify.py` D1 measures exactly that against a closed-form coast-down at 0.1% (the *wrong*, two-wheel `m_eff` is 0.638% away, so the old 1% tolerance could not tell them apart). Vertical loads depend on accelerations which depend on tire forces which depend on loads; the algebraic loop is closed by **3 fixed-point iterations** per force evaluation. `model/physical/tires/tire.py` is a simplified Pacejka with load-sensitive µ and a friction **ellipse** (separate µx/µy, fitted µx/µy = 0.91 from TTC Round 9). `model/sim.py` is fixed-step RK4 at dt = 0.25 ms with zero-order-hold inputs; the small step is set by the wheel-spin time constant (~6 ms).
+
+### The full plant — `model/physical/vehicle17.py` (default since 2026-10-22)
+
+The DOF-expansion plan built to its ledger: **17 DOF, 80 states**, `run_sim.py`'s default (`--plant planar` gets the 10-state plant above, which stays as the verified reference). State blocks and the module that owns each one's physics, each next to its `params.yaml`:
+
+| states | block | module |
+|---|---|---|
+| 13 | 6-DOF sprung body: X Y Z, u v w, quaternion, p q r | `chassis/rigid_body.py` (pure quaternion/Euler math) |
+| 8 | 4 unsprung masses: height above static + rate | `suspension/suspension.py` — springs, ARBs, bump/droop stops, camber/toe kinematics, the geometric (link) vs elastic load-transfer split |
+| 8 | 4 wheel angles + spins | in `vehicle17.py` |
+| 6 | rack + 2 knuckles (angle + rate each) | `steering/steering.py` — column and tie-rod compliance, kingpin moment from trail and scrub |
+| 4 | Bouc-Wen damper hysteresis | `dampers/damper.py` — bilinear digressive curve, α = 0 switches hysteresis off |
+| 12 | κ̃, α̃, M̃z per tire | `tires/transient.py` — relaxation lengths, aligning moment, camber thrust; wraps the Magic Formula tire |
+| 8 | rotor speed + shaft twist per corner | `motors/motors.py` — Kt, torque-speed ceiling scaled by bus voltage, regen limit, losses, backlash; `CommandPath` is the inverter's latency + ramp at the VCU rate (discrete, no states — the DOF doc's argument) |
+| 9 + 7 | 3-zone battery: SOC, V1, V2; T_core, T_surf, T_cool | `battery/battery.py` — 2-RC cell model, pack current solved as a quadratic, BMS current/voltage/thermal window, hot-spot factor |
+| 2 | brake line pressures | `brakes/brakes.py` — first-order hydraulics, P·A·µ·R·N torque. **Mechanical brakes exist on this plant** (the BPS still also requests regen through the firmware) |
+| 3 | accel bias, 2 GPS speed errors | random walks advanced by the sensor suite at the VCU rate (noise is not an ODE); `sensors/gps/gps.py` |
+
+How it is coupled (the usual 14-DOF split): horizontal equations use the total mass, vertical ones the sprung mass; suspension deflection is algebraic (body corner height − unsprung height); spring forces are `F_static + k·s` so s = 0 is static ride height and no preload is entered; tire vertical force is the carcass spring and IS the Fz the force law sees. Lateral tire force goes to the body at the contact patch, the link part (`(F_y − m_u a)·h_rc/t`, plus `m_u a h_u/t` onto the tires only) as an equal-and-opposite vertical pair — verify K2/K3/J5 check the textbook results that fall out. The sprung CG is the body origin; moment arms are from it (`a_s`, `b_s`), not from the whole-vehicle CG.
+
+The firmware's **current** command (`ControllerDebug.I_cmd`, amps) drives the motor model inside the plant; `T` is only what the planar plant consumes. `plant_input()` builds the per-cycle input; `sim.py` is plant-agnostic (asks the model for `nstates`, `initial_state`, `derivatives`, `state_view`, `sensor_truth`, `diverged`, `EXTRA_LOG`). The sensor suite reads a `SensorTruth` from the plant, never a state index; the planar path is bit-identical to before the refactor.
+
+**Placeholders.** 154 of 223 parameters are `PLACEHOLDER` (every one says which measurement replaces it; `param_sheet.py` lists them). Two to know about: steering compliance (`column_stiffness`, `tierod_stiffness`) costs ~1.7° of a 5° command at 0.9 g, so the full plant yaws ~35% less than the planar on the same input (verify N1 INFO); and `knuckle_damping` is set to 6 N·m·s/rad because at the first guess (1) the steering shimmied at 16 Hz through the trail/relaxation feedback loop — the sim found a real mechanism, the number is still a guess. Values the team sent on 2026-10-22 (sheet of unconfirmed car: I_xx, I_yy, unsprung masses, k_t, damper slopes) went in as placeholders tagged "team sheet (which car is unconfirmed)"; the pre-existing conflicting values (h_cg, tracks, wheelbase, tire size) were **not** changed.
+
+**Verification** sections J–N (`verify.py`): J chassis (quaternion norm, static equilibrium to 1e-15, aero static deflection, gravity on a grade, the whole-vehicle load-transfer identity), K suspension (damper curve, link/unsprung transfer identities, the two-axle roll-angle closed form to 0.1%, bump stop, ARB monotonic), L tires/steering (relaxation 63.2%, aligning-moment sign, camber thrust, rack/knuckle settling, scrub torque-steer sign), M drivetrain/battery/thermal/brakes (torque ceiling, rotor equation with hand-summed losses to 1e-15, I·V = P, coulomb count, thermal network identities, derate, hydraulic τ, brake gain), N the full plant with every placeholder effect switched off reproduces the planar plant below the grip limit (−1.5%), firmware in the loop completes with the s-diff's cut visible in T_e, bit-exact repeatability with the bias walks. A derivative evaluation costs ~37 µs; a 5 s maneuver runs in ~3 s per config.
 
 ### The controller is the VCU firmware — there is no Python controller
 

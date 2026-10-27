@@ -26,6 +26,28 @@ same-side front — a sim-side assumption, printed with every run.
 through Kt and the gearbox. A maneuver's scripted torque is turned into the
 pedal position that produces it, using that same map.
 
+### Two plants: the full 17-DOF car and the planar reference
+
+The default plant is `model/physical/vehicle17.py`: 17 DOF, 80 states — a
+6-DOF sprung body on a quaternion, four unsprung masses on tire springs, four
+wheel spins, the rack and both front knuckles, Bouc-Wen damper hysteresis,
+tire relaxation and aligning moment, rotor + shaft compliance per corner,
+a 3-zone battery (electrical and thermal) with the BMS derate, hydraulic
+brakes, and three sensor-bias states. The firmware's current command drives
+the motor model (Kt, torque-speed ceiling, pack limits) inside the plant.
+`run_sim.py --plant planar` runs the 10-state two-track plant it grew out of
+(`vehicle.py`), which `verify.py` sections A–I check against closed forms and
+section N checks the full plant against.
+
+**154 of the 223 parameters are PLACEHOLDERS** (tagged in every
+`params.yaml`, listed in `docs/datasheets/FSAE-Sim Parameters.xlsx`): the
+physics is complete, the numbers for most of it are not. Each placeholder
+entry says which measurement replaces it. The biggest placeholder effect
+today is steering compliance (column and tie-rod stiffness): at 0.9 g the
+knuckles reach ~3.3° of a 5° command, so the full plant yaws ~35% less than
+the planar one on the same input. That is a real mechanism with a guessed
+magnitude.
+
 ### VCU firmware (SIL) setup
 
 The sim cannot run without the VCU firmware: it is the only controller.
@@ -103,6 +125,7 @@ git submodule update --init sil/SRE-VCU
 
 # other flags to run with
 .venv/bin/python run_sim.py --no-animate                    # skip video (~25 s/maneuver)
+.venv/bin/python run_sim.py --plant planar --no-animate     # the 10-state two-track reference plant instead of the 17-DOF one
 .venv/bin/python run_sim.py --maneuver step_steer --no-animate   # one maneuver, ~25 s
 .venv/bin/python run_sim.py -l "ttc-tires" -n "first real tire fit" # label run
 

@@ -26,6 +26,19 @@ Sections
                        wheel-speed kinematics
   I  sensor stack      steer map, WSS chain, determinism, vx estimate, and
                        the pedal map round trip through the firmware
+  J  full plant        6-DOF chassis: quaternion norm, static equilibrium,
+                       aero static deflection, gravity on a grade, the
+                       whole-vehicle load-transfer identity
+  K  full plant        suspension & dampers: damper curve, link/unsprung
+                       transfer identities, two-axle roll closed form,
+                       bump stop, ARB monotonicity
+  L  full plant        tire transients & steering: relaxation, aligning
+                       moment, camber thrust, rack/knuckle settling, scrub
+  M  full plant        motors, battery, thermal, brakes: torque ceiling,
+                       rotor equation with hand-summed losses, I·V = P,
+                       coulomb count, thermal network, derate, hydraulics
+  N  full plant        collapses to the planar plant with its extra effects
+                       off; firmware in the loop; bit-exact repeatability
 
 Sections D and E drive the plant with EqualTorque, a fixture defined below
 that reads the true state — closed-form answers need exact, known torques,
@@ -52,7 +65,7 @@ from model.physical.vehicle import (VehicleModel, front_steer_angles, NSTATES, N
 from sil.vcu_sil import (make_configs, ControllerDebug, VcuProcess,
                          SIL_EXE, SIL_OPEN_EXE)
 from model.maneuvers.maneuvers import Maneuver, step_steer, corner_exit, slalom
-from model.sim import simulate, metrics
+from model.sim import simulate, metrics, run_matrix
 
 FAIL = []
 RESULTS = []
@@ -835,7 +848,8 @@ def section_i():
     for j, w0 in zip(IW, (40.0, 50.0, 60.0, 70.0)):
         s[j] = w0
     from model.sensors import DriverInputs
-    sr = sen.measure(s, DriverInputs(), {"ax": 0, "ay": 0}, 0.01, False)
+    model_i2 = VehicleModel(vp, MagicFormulaTire(tp_f), MagicFormulaTire(tp_r))
+    sr = sen.measure(model_i2, s, DriverInputs(), {"ax": 0, "ay": 0}, 0.01, False)
     got = [getattr(sr, "wheel_speed_" + nm) for nm in WHEEL_NAMES]
     want = [40.0, 50.0, 60.0, 70.0]
     check("I2", "WSS: motor rpm → wheel speed chain exact on all four corners",
@@ -893,6 +907,529 @@ def section_i():
           f"({vp.driven_wheels} driven wheels, ADC quantization included)")
 
 
+# ═══════════════════════════════════════════ J–N. the full (17-DOF) plant
+# Every check below is against a closed form, an algebraic identity or a
+# module-level unit test — never the plant's own assembled formula. The
+# EqualTorqueFull fixture is the same scaffolding as EqualTorque, reading
+# the full plant's yaw-rate slot for its diagnostic.
+from dataclasses import replace as _replace
+from model.params import full_setup, FullParams
+from model.physical import vehicle17 as V17
+from model.physical.vehicle17 import FullVehicleModel
+
+
+class EqualTorqueFull(EqualTorque):
+    def update(self, s, delta, T_req, dt):
+        n = self.vp.driven_wheels
+        each = T_req / n
+        T = (each, each, each, each) if n == 4 else (0.0, 0.0, each, each)
+        dbg = ControllerDebug(T=T)
+        dbg.dw_target = s[V17.IR] * self.vp.track_r / self.vp.r_wheel
+        return dbg
+
+
+def _full_model(fp=None, tp_f=None, tp_r=None):
+    vp, fp0, tpf0, tpr0 = full_setup()
+    fp = fp0 if fp is None else fp
+    tp_f = tpf0 if tp_f is None else tp_f
+    tp_r = tpr0 if tp_r is None else tp_r
+    return vp, fp, FullVehicleModel(vp, fp, MagicFormulaTire(tp_f),
+                                    MagicFormulaTire(tp_r))
+
+
+def section_j():
+    """6-DOF chassis: attitude integration, static equilibrium, gravity on a
+    grade, and the whole-vehicle lateral load-transfer identity."""
+    vp, fp, model = _full_model()
+    c = fp.chassis
+
+    # J1: the attitude quaternion stays on the unit sphere through a slalom
+    log = simulate(model, EqualTorqueFull(vp), slalom(), dt=2.5e-4, ctrl_every=40)
+    # the log has roll/pitch; re-derive |q| by integrating the plant directly
+    s = model.initial_state(15.0, 0.0)
+    model.reset_run(0.01)
+    from model.sim import rk4_step
+    u = model.zero_input()
+    worst = 0.0
+    for k in range(4000):
+        delta = math.radians(4.0) * math.sin(2 * math.pi * 0.5 * k * 2.5e-4)
+        s = rk4_step(model, s, delta, u, 2.5e-4)
+        n = math.sqrt(sum(s[j] ** 2 for j in (V17.IQ0, V17.IQ1, V17.IQ2, V17.IQ3)))
+        worst = max(worst, abs(n - 1.0))
+    check("J1", "quaternion norm stays 1 through 1 s of sine steer",
+          worst < 1e-9, f"max |q|−1 = {worst:.1e}")
+    check("J1", "slalom on the full plant runs to completion",
+          log["t"][-1] >= 5.99, f"t_end {log['t'][-1]:.2f} s, max |β| "
+          f"{math.degrees(np.max(np.abs(log['beta']))):.2f}°")
+
+    # J2: at rest every derivative is zero — the static corner loads, tire
+    # deflections and spring preloads were set up by hand, the plant must
+    # agree
+    s = model.initial_state(0.0, 0.0)
+    ds, inf_ = model.derivatives(s, 0.0, model.zero_input())
+    worst = max(abs(x) for x in ds)
+    check("J2", "car at rest: all 80 derivatives zero (static equilibrium)",
+          worst < 1e-6, f"max |ds/dt| = {worst:.1e}")
+    check("J2", "at rest ΣF_z = m·g on the four tires",
+          abs(sum(inf_["Fz"]) - vp.m_total * G) < 1e-6,
+          f"ΣFz {sum(inf_['Fz']):.3f} N vs m·g {vp.m_total * G:.3f} N")
+    # the sprung CG height was derived so the two agree — check it
+    h_eff = (c.m_sprung * c.h_sprung + sum(m * fp.susp.h_unsprung
+                                           for m in c.m_unsprung)) / vp.m_total
+    check("J2", "sprung + unsprung CG heights recombine to h_cg",
+          abs(h_eff - vp.h_cg) < 1e-12, f"{h_eff:.6f} vs {vp.h_cg:.6f} m")
+
+    # J3: running at 15 m/s with drag and rolling resistance switched off
+    # (so nothing decelerates the car and no longitudinal transfer appears),
+    # the suspension settles to the aero load's static deflection,
+    # s_i = ΔF_i / (k_w + k0) — the dynamics must land on the static answer
+    _, tpf0, tpr0 = default_setup()
+    fp_j3 = FullParams()
+    fp_j3.motor = _replace(fp_j3.motor, T_fric=0.0, b_visc=0.0, eta_gear=1.0)
+    _, _, m_j3 = _full_model(fp_j3, _replace(tpf0, f_rr=0.0), _replace(tpr0, f_rr=0.0))
+    m_j3.p = _replace(vp, CdA=0.0)
+    log = simulate(m_j3, EqualTorqueFull(vp),
+                   Maneuver("coast", "coast", 2.0, 15.0, lambda t: (0.0, 0.0)),
+                   dt=2.5e-4, ctrl_every=40)
+    v_end = log["vx"][-1]
+    down = 0.5 * fp.env.rho * vp.ClA * v_end ** 2
+    dF = (0.5 * vp.aero_balance_front * down,) * 2 + \
+         (0.5 * (1 - vp.aero_balance_front) * down,) * 2
+    want = [dF[i] / (m_j3.susp.k_w[i] + fp.damp.k0) for i in range(4)]
+    got = [log["s" + nm][-1] for nm in WHEEL_NAMES]
+    err = max(abs(g - w) for g, w in zip(got, want))
+    check("J3", "constant speed: suspension travel settles to ΔF_aero/(k_w+k0)",
+          err < 0.02e-3 and abs(v_end - 15.0) < 5e-3,
+          f"max error {err * 1e6:.1f} µm (front {got[0] * 1e3:.2f} mm, rear "
+          f"{got[2] * 1e3:.2f} mm); speed held at {v_end:.4f} m/s")
+
+    # J4: gravity on a grade — a car at rest on a 5° slope starts to roll
+    # back at exactly g·sin(5°) (no aero, no rolling resistance, no slip:
+    # nothing else can touch du/dt at t = 0)
+    fp_g = FullParams()
+    fp_g.env = _replace(fp_g.env, grade=math.radians(5.0))
+    _, _, m_g = _full_model(fp_g)
+    s = m_g.initial_state(0.0, 0.0)
+    m_g.reset_run(0.01)
+    ds, _ = m_g.derivatives(s, 0.0, m_g.zero_input())
+    want = -G * math.sin(math.radians(5.0))
+    check("J4", "at rest on a 5° uphill grade: du/dt = −g·sin(5°) exactly",
+          abs(ds[V17.IU] - want) < 1e-9, f"{ds[V17.IU]:.6f} vs {want:.6f} m/s²")
+
+    # J5: steady-state cornering — the whole-vehicle load-transfer identity.
+    # Moments about the ground contact line: the per-axle vertical load
+    # differences times half-tracks equal m_t·a_y·h_cg plus the overturning
+    # term of the rolled sprung mass, m_s·g·(h_s − h_rc)·φ. Independent of
+    # how the plant splits the transfer between axles, links and springs.
+    log = simulate(model, EqualTorqueFull(vp), step_steer(), dt=2.5e-4, ctrl_every=40)
+    i = -1
+    M_t = ((log["FzFR"][i] - log["FzFL"][i]) * vp.track_f / 2.0
+           + (log["FzRR"][i] - log["FzRL"][i]) * vp.track_r / 2.0)
+    h_rc_eff = (fp.susp.h_rc_f * model.b_s + fp.susp.h_rc_r * model.a_s) / vp.wheelbase
+    phi = log["roll"][i]
+    # ΣF_y is the body-frame tire force, which already carries gravity's
+    # g·sin φ when the body is rolled — the textbook's separate overturning
+    # term m_s g (h_s − h_rc) φ is inside it (INFO line quantifies it)
+    Fy_sum = log["Fy_f"][i] + log["Fy_r"][i]
+    want = abs(Fy_sum) * vp.h_cg
+    check("J5", "steady cornering: Σ ΔFz·t/2 = ΣF_y·h_cg (the whole-vehicle moment balance, 0.5%)",
+          abs(M_t / want - 1.0) < 0.005,
+          f"{M_t:.1f} vs {want:.1f} N·m ({(M_t / want - 1) * 100:+.2f}%), "
+          f"a_y {Fy_sum / vp.m_total / G:.3f} g, roll {math.degrees(phi):.2f}°")
+    info("J5", "gravity overturning share of that transfer",
+         f"{c.m_sprung * G * (c.h_sprung - h_rc_eff) * abs(phi):.1f} N·m "
+         f"({c.m_sprung * G * (c.h_sprung - h_rc_eff) * abs(phi) / M_t:.1%}) — carried "
+         "inside ΣF_y as g·sin φ in the body frame")
+    info("J5", "full plant 5° step steer, steady state",
+         f"r {log['r'][i]:.3f} rad/s, a_y {log['ay'][i] / G:.3f} g, "
+         f"knuckles {math.degrees(log['dFL'][i]):.2f}°/{math.degrees(log['dFR'][i]):.2f}° "
+         f"for a {math.degrees(log['delta'][i]):.1f}° command — the rest is "
+         "steering compliance (PLACEHOLDER column/tie-rod stiffness)")
+
+
+def section_k():
+    """Suspension and dampers: the damper curve, the geometric/elastic split
+    identity, the roll-angle closed form, the bump stop."""
+    vp, fp, model = _full_model()
+    c = fp.chassis
+
+    # K1: with alpha = 0 the damper IS the bilinear curve; the curve is
+    # continuous at the knee and asymmetric bump/rebound
+    d = model.damp
+    knee = fp.damp.v_knee
+    ok = True
+    for v in np.linspace(-0.5, 0.5, 201):
+        F = d.force(0, v, 0.0, 0.7)         # z = 0.7 must not matter at alpha = 0
+        if v >= 0:
+            lo, hi = fp.damp.c_bump_low_f, fp.damp.c_bump_high_f
+        else:
+            lo, hi = fp.damp.c_reb_low_f, fp.damp.c_reb_high_f
+        want = lo * v if abs(v) <= knee else math.copysign(lo * knee + hi * (abs(v) - knee), v)
+        ok &= abs(F - want) < 1e-9
+    jump = abs(d.curve_force(0, knee + 1e-9) - d.curve_force(0, knee - 1e-9))
+    check("K1", "damper = bilinear dyno curve (hysteresis off), continuous at the knee",
+          ok and jump < 1e-4, f"knee jump {jump:.1e} N; rebound/bump low-speed ratio "
+          f"{fp.damp.c_reb_low_f / fp.damp.c_bump_low_f:.2f}")
+    # Bouc-Wen state is bounded at |z| <= 1 for beta + gamma = 1, A = 1
+    z = 0.0
+    for k in range(20000):
+        v = 0.3 * math.sin(2 * math.pi * 3.0 * k * 1e-4)
+        z += 1e-4 * d.z_dot(v, z)
+    check("K1", "Bouc-Wen state stays bounded (|z| ≤ 1) under a 3 Hz sweep",
+          abs(z) <= 1.0 + 1e-9, f"|z| end {abs(z):.3f}")
+
+    # K2: the geometric pair's roll moment equals −Fy·h_rc exactly, so the
+    # body is left with Fy·(h_s − h_rc) of elastic roll moment
+    Fy = (300.0, 250.0, 0.0, 0.0)
+    dFu, dFb = model.susp.geometric_transfer(Fy, (0.0,) * 4, c.h_sprung, 0.0, c.m_unsprung)
+    M_pair = sum(model.wheel_xy[i][1] * dFb[i] for i in range(4))
+    check("K2", "link reaction on the body: Σ y_i·ΔF_i = −Fy_axle·h_rc exactly",
+          abs(M_pair + 550.0 * fp.susp.h_rc_f) < 1e-9,
+          f"{M_pair:.4f} vs {-550.0 * fp.susp.h_rc_f:.4f} N·m")
+    check("K2", "the link reaction is a pure couple (Σ ΔF_i = 0) and equals the tire-side force",
+          abs(sum(dFb)) < 1e-9 and all(abs(a - b) < 1e-12 for a, b in zip(dFu, dFb)))
+    # with lateral acceleration the unsprung inertia adds m_u·a_y·h_u/t to
+    # the TIRE loads only (the body never sees it)
+    # a front-axle tire force that exactly accelerates its own unsprung
+    # masses passes nothing through the links: the body sees no reaction,
+    # the tires see m_u,axle·a_y·h_u/t
+    ay = 5.0
+    Fy_u = (c.m_unsprung_f * ay, c.m_unsprung_f * ay,
+            c.m_unsprung_r * ay, c.m_unsprung_r * ay)
+    dFu2, dFb2 = model.susp.geometric_transfer(Fy_u, (0.0,) * 4, c.h_sprung, ay, c.m_unsprung)
+    want = 2 * c.m_unsprung_f * ay * fp.susp.h_unsprung / vp.track_f
+    check("K2", "unsprung transfer: m_u,axle·a_y·h_u/t onto the outer tire, nothing onto the body",
+          abs(dFu2[1] - want) < 1e-9 and dFu2[0] == -dFu2[1]
+          and max(abs(x) for x in dFb2) < 1e-12,
+          f"{dFu2[1]:.3f} N per front tire at {ay:.0f} m/s²")
+
+    # K3: steady-state roll angle vs the closed form. The body's roll over
+    # the GROUND is the spring deflection plus the tire deflection; the
+    # springs carry only the elastic moment, the tires carry the whole
+    # transfer (elastic + link + unsprung) — and the rolled sprung mass
+    # adds its own overturning moment:
+    #     φ = [m_s a_y h_arm / K_s + m_t a_y h_cg / K_t]
+    #         / [1 − m_s g h_arm (1/K_s + 1/K_t)]
+    #     h_arm = h_s − h_rc(at the sprung CG's station)
+    #     K_s = Σ_axles (k_w + k0) t²/2 + ARBs,   K_t = Σ_axles k_t t²/2
+    # The body is rigid, so each axle's spring moment M_a is whatever makes
+    # both axles roll by the same φ:
+    #     φ = M_a/K_s,a + (M_a + G_a)/K_t,a          (springs, then tires)
+    #     Σ_a M_a = Σ_a (F_y,a − m_u,a a)(h_s − h_rc,a) + m_s g h_arm φ
+    # with G_a the link + unsprung moment of axle a and a = ΣF_y/m. Two
+    # equations, solved for φ. The axle forces come from the log; the
+    # stiffnesses and heights from the YAML.
+    log = simulate(model, EqualTorqueFull(vp), step_steer(), dt=2.5e-4, ctrl_every=40)
+    i = -1
+    a_t = (log["Fy_f"][i] + log["Fy_r"][i]) / vp.m_total
+    h_rc_eff = (fp.susp.h_rc_f * model.b_s + fp.susp.h_rc_r * model.a_s) / vp.wheelbase
+    arm = c.h_sprung - h_rc_eff
+    M0, sumG, sumC = 0.0, 0.0, 0.0
+    for Fy_a, k_w, k_arb, k_t, t, h_rc, m_ua in (
+            (log["Fy_f"][i], model.susp.k_w[0], fp.susp.k_arb_f, model.tires[0].p.k_vertical,
+             vp.track_f, fp.susp.h_rc_f, 2 * c.m_unsprung_f),
+            (log["Fy_r"][i], model.susp.k_w[2], fp.susp.k_arb_r, model.tires[2].p.k_vertical,
+             vp.track_r, fp.susp.h_rc_r, 2 * c.m_unsprung_r)):
+        K_s = (k_w + fp.damp.k0) * t * t / 2.0 + k_arb
+        K_t = k_t * t * t / 2.0
+        C = 1.0 / K_s + 1.0 / K_t
+        G_a = (Fy_a - m_ua * a_t) * h_rc + m_ua * a_t * fp.susp.h_unsprung
+        M0 += (Fy_a - m_ua * a_t) * (c.h_sprung - h_rc)
+        sumG += G_a / (K_t * C)
+        sumC += 1.0 / C
+    phi_want = (M0 + sumG) / (sumC - c.m_sprung * G * arm)
+    phi = log["roll"][i]
+    check("K3", "steady-state roll angle matches the two-axle roll-stiffness closed form (2%)",
+          abs(phi / phi_want - 1.0) < 0.02,
+          f"{math.degrees(phi):.3f}° vs {math.degrees(phi_want):.3f}° "
+          f"({(phi / phi_want - 1) * 100:+.2f}%) at {a_t / G:.3f} g")
+    info("K3", "roll gradient", f"{math.degrees(phi) / (a_t / G):.2f} °/g")
+
+    # K4: the bump stop engages exactly at its gap, at k_bs
+    gap = fp.susp.bs_gap_f
+    F0 = model.susp.stop_force(0, gap - 1e-6)
+    F1 = model.susp.stop_force(0, gap + 0.005)
+    check("K4", "bump stop: zero below the gap, k_bs·(s − gap) above it",
+          F0 == 0.0 and abs(F1 - fp.susp.k_bs * 0.005) < 1e-9,
+          f"5 mm past the gap → {F1:.0f} N")
+
+    # K5: an ARB on one axle moves that axle's share of load transfer up
+    def front_share(fp_):
+        _, _, m_ = _full_model(fp_)
+        lg = simulate(m_, EqualTorqueFull(vp), step_steer(), dt=2.5e-4, ctrl_every=40)
+        df = lg["FzFR"][-1] - lg["FzFL"][-1]
+        dr = lg["FzRR"][-1] - lg["FzRL"][-1]
+        return df / (df + dr)
+    fp_arb = FullParams()
+    fp_arb.susp = _replace(fp_arb.susp, k_arb_f=300.0 / math.radians(1.0))   # 300 N·m/deg
+    base, with_bar = front_share(fp), front_share(fp_arb)
+    check("K5", "a 300 N·m/deg FRONT bar raises the front share of lateral transfer",
+          with_bar > base + 0.02, f"front share {base:.3f} → {with_bar:.3f}")
+
+
+def section_l():
+    """Tire transients, aligning moment, and the steering DOFs."""
+    vp, fp, model = _full_model()
+
+    # L1: relaxation — a step in slip ratio at constant speed reaches 63.2%
+    # after rolling one relaxation length
+    t = model.tires[0]
+    v = 12.0
+    sig = t.p.sigma_kappa
+    kt = 0.0
+    dt = 1e-5
+    n = int(round(sig / v / dt))
+    for _ in range(n):
+        kd, _, _ = t.slip_rates(0.1, 0.0, 0.0, kt, 0.0, 0.0, v)
+        kt += dt * kd
+    check("L1", "slip-ratio relaxation: 63.2% of a step after rolling σ_κ",
+          abs(kt / 0.1 - (1 - math.exp(-1))) < 1e-3,
+          f"{kt / 0.1:.4f} vs {1 - math.exp(-1):.4f} after {sig:.2f} m")
+
+    # L2: aligning moment opposes the slip angle and vanishes at the trail's
+    # slip angle
+    Fz = t.p.Fz_nom
+    a = math.radians(2.0)
+    Fy = t.mf.lateral(a, Fz)
+    Mz = t.aligning_moment(a, Fy, Fz)
+    want = -t.p.trail_0 * (1 - a / t.p.trail_alpha) * Fy
+    check("L2", "aligning moment = −t_p(α)·F_y, signed to reduce |α|",
+          Fy > 0 and Mz < 0 and abs(Mz - want) < 1e-9,
+          f"α 2°: Fy {Fy:.0f} N, Mz {Mz:.2f} N·m")
+    check("L2", "pneumatic trail is zero beyond trail_slip_angle",
+          t.aligning_moment(t.p.trail_alpha * 1.5, 500.0, Fz) == 0.0)
+
+    # L3: camber thrust pushes toward the side the top leans, scales with
+    # load, and is switched off on a parked (non-rolling) tire
+    Fx0, Fy0 = t.forces(0.0, 0.0, Fz, 0.0)
+    Fxp, Fyp = t.forces(0.0, 0.0, Fz, math.radians(1.0))
+    Fxs, Fys = t.forces(0.0, 0.0, Fz, math.radians(1.0), rolling=0.0)
+    check("L3", "camber thrust: +γ → +Fy, none at γ = 0, none when not rolling",
+          Fy0 == 0.0 and Fyp > 0 and Fys == 0.0 and abs(Fyp - t.p.camber_stiffness * math.radians(1.0)) < 1e-9,
+          f"1° at Fz_nom → {Fyp:.1f} N")
+
+    # L4: steering DOFs alone (no tire moment): the rack settles exactly at
+    # the handwheel's rack target and the knuckles at the kinematic angles
+    st = model.steer
+    hw = math.radians(45.0)
+    x = [0.0] * 6                     # q_r q̇_r δ_FL δ̇_FL δ_FR δ̇_FR
+
+    def f(x):
+        (qdd, dFLdd, dFRdd), _ = st.derivatives(x[0], x[1], x[2], x[3], x[4], x[5], hw, (0.0, 0.0))
+        return [x[1], qdd, x[3], dFLdd, x[5], dFRdd]
+    dt = 2e-5
+    for _ in range(int(1.5 / dt)):
+        k1 = f(x)
+        k2 = f([x[i] + 0.5 * dt * k1[i] for i in range(6)])
+        k3 = f([x[i] + 0.5 * dt * k2[i] for i in range(6)])
+        k4 = f([x[i] + dt * k3[i] for i in range(6)])
+        x = [x[i] + dt / 6 * (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i]) for i in range(6)]
+    q_want = st.rack_target(hw)
+    kin = st.kinematic_angles(q_want)
+    check("L4", "steering DOFs settle: rack at c_factor·θ/2π, knuckles at the kinematic angles",
+          abs(x[0] - q_want) < 1e-7 and abs(x[2] - kin[0]) < 1e-6 and abs(x[4] - kin[1]) < 1e-6,
+          f"rack {x[0] * 1e3:.3f} mm (want {q_want * 1e3:.3f}), FL {math.degrees(x[2]):.3f}° "
+          f"FR {math.degrees(x[4]):.3f}° (want {math.degrees(kin[0]):.3f}/{math.degrees(kin[1]):.3f})")
+    # L5: a left/right drive-torque split steers the wheels through the scrub
+    # radius: the left wheel right, the right wheel left (torque steer)
+    M_L = st.kingpin_moment(0.0, 500.0, 0.0, +1.0)
+    M_R = st.kingpin_moment(0.0, 500.0, 0.0, -1.0)
+    check("L5", "scrub radius: a drive force steers the left wheel right and the right wheel left",
+          M_L < 0 < M_R and abs(M_L + M_R) < 1e-12,
+          f"±{abs(M_L):.1f} N·m per 500 N")
+
+
+def section_m():
+    """Motors, shafts, battery, thermal, brakes."""
+    vp, fp, model = _full_model()
+    mp, bp = fp.motor, fp.batt
+    md = model.motor
+
+    # M1: torque ceiling — peak torque below base speed, P/ω above, scaled by bus voltage
+    w_base = mp.P_peak / mp.T_peak
+    check("M1", "torque ceiling: T_peak below base speed, P_peak/ω above",
+          md.torque_ceiling(0.5 * w_base, mp.V_nom) == mp.T_peak
+          and abs(md.torque_ceiling(2 * w_base, mp.V_nom) - 0.5 * mp.T_peak) < 1e-12
+          and abs(md.torque_ceiling(2 * w_base, 0.5 * mp.V_nom) - 0.25 * mp.T_peak) < 1e-12,
+          f"base speed {w_base * 30 / math.pi:.0f} rpm; half the bus voltage halves the ceiling above it")
+    check("M1", "no regen below the rules cut-off speed; regen capped at T_regen_max above it",
+          md.electromagnetic_torque(-200.0, 500.0, mp.V_nom, False) == 0.0
+          and md.electromagnetic_torque(-200.0, 500.0, mp.V_nom, True) == -mp.T_regen_max)
+
+    # M2: the rotor equation with the losses summed BY HAND from the YAML:
+    # drive the plant 2 s at a constant current, then at that state
+    #     T_s = G·(T_e − T_fric − b·ω_m − (1−η_g)|T_s|/G − J_m·ω̇_m)
+    # must hold to round-off (T_s from the shaft twist, ω̇_m from the
+    # plant's derivative, T_e from the inverter model)
+    from model.sim import rk4_step
+    s = model.initial_state(12.0, 0.0)
+    model.reset_run(0.01)
+    u = (0.0, (6.0, 6.0, 6.0, 6.0), 0.0)        # 6 A on each motor
+    for _ in range(8000):
+        s = rk4_step(model, s, 0.0, u, 2.5e-4)
+    ds, inf_ = model.derivatives(s, 0.0, u)
+    worst = 0.0
+    for i in range(4):
+        Te, Ts, wm = inf_["T_e"][i], inf_["T_s"][i], s[V17.IOMM[i]]
+        loss = mp.T_fric + mp.b_visc * wm + (1 - mp.eta_gear) * abs(Ts) / mp.G
+        worst = max(worst, abs(Ts - mp.G * (Te - loss - mp.J_m * ds[V17.IOMM[i]])))
+    check("M2", "rotor equation: T_s = G·(T_e − friction − windage − gear loss − J_m·ω̇_m), losses summed by hand",
+          worst < 1e-9, f"worst mismatch {worst:.1e} N·m; T_e {inf_['T_e'][2]:.3f} → "
+          f"T_s {inf_['T_s'][2]:.2f} N·m at the wheel (= {inf_['T_s'][2] / (mp.G * inf_['T_e'][2]):.1%} of G·T_e)")
+    check("M2", "Kt: T_e = Kt·I below the ceiling",
+          abs(inf_["T_e"][2] - mp.kt * 6.0) < 1e-12)
+    log = simulate(model, EqualTorqueFull(vp), step_steer(), dt=2.5e-4, ctrl_every=40)
+
+    # M3: pack current solves the power identity I·V_bus = P_elec at every sample
+    I, V, P = log["I_pack"], log["V_bus"], log["P_elec"]
+    mask = np.abs(P) > 100.0
+    rel = np.max(np.abs(I[mask] * V[mask] - P[mask]) / np.abs(P[mask]))
+    check("M3", "pack current: I·V_bus = Σ motor electrical power at every sample",
+          rel < 1e-9, f"worst {rel:.1e}; I {np.max(I):.1f} A, V_bus {np.min(V):.1f}–{np.max(V):.1f} V")
+
+    # M4: coulomb counting — ΔSOC = −η_c ∫I dt / (n_p Q_cap)
+    dsoc = log["SOC"][-1] - log["SOC"][0]
+    want = -bp.eta_c * np.trapezoid(I, log["t"]) / (bp.n_p * bp.Q_cap)
+    check("M4", "SOC change = −η_c·∫I dt / (n_p·Q_cap)",
+          abs(dsoc / want - 1.0) < 1e-3, f"ΔSOC {dsoc:.5e} vs {want:.5e} "
+          f"({(dsoc / want - 1) * 100:+.3f}%, trapezoid on the 1 kHz log)")
+
+    # M5: thermal network steady state — integrate the battery alone at a
+    # constant current until settled, then the algebraic identities
+    #   T_core − T_surf = Q R_cs,  T_surf − T_cool = Q R_sc,j,
+    #   T_cool − T_amb = ΣQ / UA
+    b = model.batt
+    I_c = 150.0
+    socs, v1s, v2s = (0.9,) * 3, (0.0,) * 3, (0.0,) * 3
+    Tc, Ts, Tcool = [bp.T_0] * 3, [bp.T_0] * 3, bp.T_0
+    dt = 0.5
+    for _ in range(int(6000 / dt)):
+        _, _, _, dtc, dts, dtcool = b.derivatives(I_c, socs, v1s, v2s, Tc, Ts, Tcool, fp.env.T_amb)
+        Tc = [Tc[j] + dt * dtc[j] for j in range(3)]
+        Ts = [Ts[j] + dt * dts[j] for j in range(3)]
+        Tcool += dt * dtcool
+    Q = [b.n_cells_zone * (I_c / bp.n_p) ** 2 * b.r0(Tc[j]) for j in range(3)]
+    e1 = max(abs((Tc[j] - Ts[j]) - Q[j] * bp.R_cs) for j in range(3))
+    e2 = max(abs((Ts[j] - Tcool) - Q[j] * b.R_sc[j]) for j in range(3))
+    e3 = abs((Tcool - fp.env.T_amb) - sum(Q) / bp.UA)
+    check("M5", "thermal steady state: ΔT = Q·R across each stage, ΣQ/UA to ambient",
+          max(e1, e2, e3) < 0.05,
+          f"core {max(Tc):.1f} °C (middle zone hottest: {Tc[1] > Tc[0]}), coolant {Tcool:.1f} °C "
+          f"at {I_c:.0f} A; worst identity error {max(e1, e2, e3):.3f} K")
+    check("M5", "the middle zone runs hottest (hot-spot factor)", Tc[1] > Tc[0] and Tc[1] > Tc[2])
+    # derate: the current window shrinks linearly between derate_start and derate_end
+    I_dis_cold, _ = b.current_window(socs, v1s, v2s, (25.0,) * 3)
+    I_dis_mid, _ = b.current_window(socs, v1s, v2s, (0.5 * (bp.T_derate_0 + bp.T_derate_1),) * 3)
+    I_dis_hot, _ = b.current_window(socs, v1s, v2s, (bp.T_derate_1 + 5.0,) * 3)
+    check("M5", "BMS derate: full current cold, half way at the midpoint, zero past derate_end",
+          abs(I_dis_mid / I_dis_cold - 0.5) < 1e-9 and I_dis_hot == 0.0,
+          f"{I_dis_cold:.0f} A → {I_dis_mid:.0f} A → {I_dis_hot:.0f} A")
+
+    # M6: brakes — first-order pressure step and the hand-computed torque gain
+    br = model.brakes
+    P = 0.0
+    dt = 1e-5
+    for _ in range(int(round(fp.brake.tau_f / dt))):
+        P += dt * br.pressure_rates(P, 0.0, 40.0)[0]
+    check("M6", "front line pressure reaches 63.2% of the pedal after τ_f",
+          abs(P / 40.0 - (1 - math.exp(-1))) < 1e-3, f"{P:.2f} bar of 40 after {fp.brake.tau_f * 1e3:.0f} ms")
+    gain = 1e5 * fp.brake.A_p_f * fp.brake.mu_pad * fp.brake.R_eff_f * fp.brake.N_surf
+    T = br.torques(40.0, 0.0, (50.0, 50.0, 50.0, 50.0))
+    check("M6", "brake torque = P·A_p·μ·R_eff·N, opposing rotation",
+          abs(T[0] + 40.0 * gain) < 1e-6 and T[2] == 0.0,
+          f"40 bar front → {-T[0]:.0f} N·m per wheel ({gain:.2f} N·m/bar)")
+
+
+def section_n():
+    """Cross-plant and firmware-in-the-loop on the full plant."""
+    vp, fp, model = _full_model()
+    from model.sensors import SensorSuite
+
+    # N1: with every effect the planar plant lacks switched off (steering
+    # compliance, relaxation, trail, camber, rolling resistance, motor
+    # losses, roll centres, anti-geometry, gas spring, CoP height), the full
+    # plant's steady-state cornering must reproduce the planar plant's
+    fp_r = FullParams()
+    # steering compliance is removed by removing what LOADS it — mechanical
+    # trail, scrub radius (and pneumatic trail, below) — not by stiffening:
+    # the tie-rod stiffness reflects through the steering ratio squared
+    # onto the rack, and a rigid value puts that mode past RK4's stability
+    fp_r.steer = _replace(fp_r.steer, t_mech=0.0, r_scrub=0.0, F_fric=0.0)
+    fp_r.damp = _replace(fp_r.damp, k0=0.0)
+    fp_r.motor = _replace(fp_r.motor, T_fric=0.0, b_visc=0.0, eta_gear=1.0)
+    fp_r.susp = _replace(fp_r.susp, h_rc_f=0.0, h_rc_r=0.0, anti_dive=0.0,
+                         anti_squat=0.0, camber_bump_f=0.0, camber_bump_r=0.0,
+                         camber_roll_f=0.0, camber_roll_r=0.0,
+                         camber0_f=0.0, camber0_r=0.0)
+    fp_r.chassis = _replace(fp_r.chassis, cop_height=fp.chassis.h_sprung)
+    _, tp_f, tp_r = default_setup()
+    rigid = dict(sigma_kappa=0.01, sigma_alpha=0.01, sigma_mz=0.01, trail_0=0.0,
+                 camber_stiffness=0.0, f_rr=0.0)
+    tp_f_r, tp_r_r = _replace(tp_f, **rigid), _replace(tp_r, **rigid)
+    _, _, m_rigid = _full_model(fp_r, tp_f_r, tp_r_r)
+    m_plan = VehicleModel(vp, MagicFormulaTire(tp_f), MagicFormulaTire(tp_r))
+    # below the grip limit (~0.5 g): at the limit a 1% difference in how
+    # the two plants split load between the wheels moves the yaw rate 3–4%,
+    # which says nothing about whether the physics collapses correctly
+    man = step_steer(delta_deg=3.0, vx0=12.0, T_hold=50.0)
+    lf = simulate(m_rigid, EqualTorqueFull(vp), man, dt=2.5e-4, ctrl_every=40)
+    lp = simulate(m_plan, EqualTorque(vp), man, dt=2.5e-4, ctrl_every=40)
+    r_f, r_p = lf["r"][-1], lp["r"][-1]
+    ay_f, ay_p = lf["ay"][-1], lp["ay"][-1]
+    v_f, v_p = lf["vx"][-1], lp["vx"][-1]
+    check("N1", "rigid-ised full plant reproduces the planar plant's steady yaw rate (2%, 3° at 12 m/s)",
+          abs(r_f / r_p - 1.0) < 0.02, f"r {r_f:.4f} vs {r_p:.4f} rad/s ({(r_f / r_p - 1) * 100:+.2f}%)")
+    check("N1", "… and its lateral acceleration and speed",
+          abs(ay_f / ay_p - 1.0) < 0.02 and abs(v_f / v_p - 1.0) < 0.01,
+          f"a_y {ay_f / G:.3f} vs {ay_p / G:.3f} g; v {v_f:.2f} vs {v_p:.2f} m/s")
+    man5 = step_steer()
+    lf5 = simulate(m_rigid, EqualTorqueFull(vp), man5, dt=2.5e-4, ctrl_every=40)
+    lp5 = simulate(m_plan, EqualTorque(vp), man5, dt=2.5e-4, ctrl_every=40)
+    full = simulate(model, EqualTorqueFull(vp), man5, dt=2.5e-4, ctrl_every=40)
+    info("N1", "at the grip limit (5° at 15 m/s): rigid-ised full vs planar",
+         f"r {lf5['r'][-1]:.4f} vs {lp5['r'][-1]:.4f} rad/s ({(lf5['r'][-1] / lp5['r'][-1] - 1) * 100:+.1f}%), "
+         f"a_y {lf5['ay'][-1] / G:.3f} vs {lp5['ay'][-1] / G:.3f} g — load-split differences at the limit")
+    info("N1", "full plant with every placeholder effect ON vs planar, same 5° step",
+         f"r {full['r'][-1]:.4f} vs {lp5['r'][-1]:.4f} rad/s ({(full['r'][-1] / lp5['r'][-1] - 1) * 100:+.1f}%): "
+         "the gap is steering compliance + transients + camber — all PLACEHOLDER-driven")
+
+    # N2: the firmware in the loop on the full plant — both configs complete
+    # the step steer and the corner exit, torques stay inside the motor's
+    # envelope, and the s-diff's cut shows up in the rear electromagnetic
+    # torques when the wheel is past DELTA_MAX
+    sensors = SensorSuite(vp)
+    for man in (step_steer(), corner_exit()):
+        model.reset_run(0.01)
+        res = run_matrix(model, make_configs(vp), man, dt=2.5e-4,
+                         sensors=sensors, ctrl_every=40)
+        for nm, r in res.items():
+            lg = r["log"]
+            Te_max = max(np.max(np.abs(lg["Te_" + w])) for w in WHEEL_NAMES)
+            check("N2", f"{man.slug} / {nm}: completes on the full plant, |T_e| ≤ T_peak",
+                  r["metrics"]["finished"] and Te_max <= fp.motor.T_peak + 1e-9,
+                  f"max |T_e| {Te_max:.2f} N·m, max |β| {r['metrics']['max |beta| [deg]']:.2f}°, "
+                  f"max |κ| {r['metrics']['max |kappa| [-]']:.3f}")
+        if man.slug == "step_steer":
+            sd = res["s-diff"]["log"]
+            i = -1
+            check("N2", "s-diff at 5° left: inner-rear T_e below outer-rear (the firmware's cut reaches the motors)",
+                  sd["Te_RL"][i] < sd["Te_RR"][i] - 1e-6,
+                  f"T_e RL {sd['Te_RL'][i]:.3f} vs RR {sd['Te_RR'][i]:.3f} N·m")
+            op = res["open diff"]["log"]
+            check("N2", "open diff at 5° left: equal rear T_e",
+                  abs(op["Te_RL"][i] - op["Te_RR"][i]) < 1e-6)
+
+    # N3: seeded noise + firmware + bias walks → bit-exact repeatability
+    man = step_steer()
+    a = simulate(model, make_configs(vp)[1], man, dt=2.5e-4, sensors=SensorSuite(vp), ctrl_every=40)
+    b = simulate(model, make_configs(vp)[1], man, dt=2.5e-4, sensors=SensorSuite(vp), ctrl_every=40)
+    same = all(np.array_equal(a[k], b[k]) for k in ("r", "Te_RL", "b_ax", "b_gps1", "vx_est"))
+    check("N3", "full plant + firmware + GPS/accel bias walks: two runs bit-identical", same,
+          f"bias walked to b_ax {a['b_ax'][-1]:+.2e} m/s², b_gps1 {a['b_gps1'][-1]:+.3e} m/s")
+    moved = abs(a["b_ax"][-1]) > 0.0 or abs(a["b_gps1"][-1]) > 0.0
+    check("N3", "the bias states actually walk (not stuck at zero)", moved)
+
+
 def main():
     print("FSAE-Sim physics verification — independent cross-checks")
     print("=" * 64)
@@ -903,7 +1440,7 @@ def main():
     except FirmwareError as e:
         check("F0", "VCU firmware found and compiled", False, str(e))
         fw_ok = False
-    needs_fw = {"F", "G", "I"}
+    needs_fw = {"F", "G", "I", "N"}
     for name, fn in (("A. tire model", section_a),
                      ("B. vertical loads", section_b),
                      ("C. slip kinematics", section_c),
@@ -911,7 +1448,12 @@ def main():
                      ("E. vs bicycle model", section_e),
                      ("F. VCU firmware vs its own source", section_f),
                      ("G. in-run audit (firmware in the loop)", section_g),
-                     ("I. sensor stack", section_i)):
+                     ("I. sensor stack", section_i),
+                     ("J. full plant: 6-DOF chassis", section_j),
+                     ("K. full plant: suspension & dampers", section_k),
+                     ("L. full plant: tire transients & steering", section_l),
+                     ("M. full plant: motors, battery, thermal, brakes", section_m),
+                     ("N. full plant: vs planar, firmware in the loop", section_n)):
         print(f"\n── {name} " + "─" * (60 - len(name)))
         if name[0] in needs_fw and not fw_ok:
             print("   skipped — the firmware did not build (see F0)")

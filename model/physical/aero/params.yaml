@@ -75,3 +75,27 @@ balance_front:
   why: >
     Moves grip between axles as speed rises — shapes high-speed balance
     directly. One of the last pure guesses outside tires.
+
+# ── full plant (vehicle17.py) ────────────────────────────────────────────────
+
+cop_height:
+  label:  "Centre-of-pressure height"
+  value:  0.3
+  unit:   m
+  symbol: h_cp
+  status: PLACEHOLDER — CFD
+  what:   Height above ground at which the drag force acts.
+  need:   CoP height from CFD
+  how:    CFD (moment about the ground / drag)
+  why:    Drag at height pitches the nose up at speed; the planar plant ignores this.
+
+ride_height_sensitivity:
+  label:  "Downforce ride-height sensitivity"
+  value:  0.0
+  unit:   1/mm
+  symbol: dCl_dh
+  status: PLACEHOLDER — assumed 0 until CFD sweeps exist
+  what:   "Fractional change of ClA per mm of mean ride-height change from static (negative: lower = more downforce)."
+  need:   CFD at 2-3 ride heights
+  how:    CFD sweep
+  why:    Squat and dive change the downforce, which changes grip mid-corner.

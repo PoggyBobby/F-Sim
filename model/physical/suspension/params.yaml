@@ -1,0 +1,341 @@
+namespace: suspension
+order: 72
+title: "SUSPENSION — jounce DOFs, springs, ARBs, kinematics (full plant)"
+
+about: >
+  The four suspension (jounce) DOFs of the full 17-DOF plant
+  (model/physical/vehicle17.py): one unsprung mass per corner moving
+  vertically against a spring, a damper (dampers/params.yaml), an anti-roll
+  bar and a bump stop, with the load-transfer geometry (roll centres,
+  anti-dive/anti-squat) that decides how much of each tire force goes
+  through the links instantly and how much through the springs.
+
+  The planar plant (vehicle.py) does not read this file — it uses the crude
+  spring-ratio split in loads/params.yaml. The spring RATES are shared: this
+  file derives wheel rates from loads.spring_rate_* and the motion ratios
+  below, so the two plants can never disagree about the springs.
+
+  EVERYTHING here except the spring rates is a PLACEHOLDER. The whole file
+  is filled from one kinematics-model export (OptimumK / Lotus Shark) plus
+  the setup sheet — ask the suspension lead for that export rather than for
+  the numbers one by one.
+
+motion_ratio_front:
+  label:  "Front spring motion ratio"
+  value:  1.0
+  unit:   "-"
+  symbol: MR_f
+  status: PLACEHOLDER — kinematics model
+  what:   Spring (shock) travel per unit of wheel travel at the front. Wheel rate = spring rate x MR^2.
+  need:   Front motion ratio at static ride height
+  how:    Kinematics model output, or measure shock travel / wheel travel with a dial gauge
+  why:    Squared into the wheel rate — a 0.8 ratio makes the front 36% softer than the spring label says.
+
+motion_ratio_rear:
+  label:  "Rear spring motion ratio"
+  value:  1.0
+  unit:   "-"
+  symbol: MR_r
+  status: PLACEHOLDER — kinematics model
+  what:   Same as motion_ratio_front, rear.
+  need:   Rear motion ratio at static ride height
+  how:    Kinematics model output, or dial gauge
+  why:    Rear wheel rate, hence rear roll stiffness and the load-transfer split.
+
+wheel_rate_front:
+  label:  "Front wheel rate"
+  derived: loads.spring_rate_front * suspension.motion_ratio_front ** 2
+  unit:   N/m
+  symbol: k_wf
+  status: DERIVED
+  what:   Vertical stiffness at the FRONT contact patch from the spring alone (no ARB, no tire).
+  need:   "-"
+  how:    = spring rate x motion ratio^2, never entered directly
+  why:    The spring force in the front jounce equations.
+
+wheel_rate_rear:
+  label:  "Rear wheel rate"
+  derived: loads.spring_rate_rear * suspension.motion_ratio_rear ** 2
+  unit:   N/m
+  symbol: k_wr
+  status: DERIVED
+  what:   Vertical stiffness at the REAR contact patch from the spring alone.
+  need:   "-"
+  how:    = spring rate x motion ratio^2
+  why:    The spring force in the rear jounce equations.
+
+arb_rate_front:
+  label:  "Front anti-roll bar rate (at the wheels)"
+  value:  0.0
+  unit:   N*m/deg
+  symbol: k_arb_f
+  status: PLACEHOLDER — assumed NO front bar; ask
+  what: >
+    Roll stiffness the front ARB adds, as a moment per degree of body roll
+    measured at the wheels (motion ratio already included). 0 = no bar.
+  need:   'Front ARB: bar OD/ID, arm length, material, motion ratio — or "none"'
+  how:    ARB spec sheet + kinematics; or twist test with a torque wrench
+  why: >
+    Sets the FRONT share of lateral load transfer. On an s-diff car that
+    share decides whether cutting the inner rear produces yaw or just push.
+
+arb_rate_rear:
+  label:  "Rear anti-roll bar rate (at the wheels)"
+  value:  0.0
+  unit:   N*m/deg
+  symbol: k_arb_r
+  status: PLACEHOLDER — assumed NO rear bar; ask
+  what:   Same as arb_rate_front, rear.
+  need:   Rear ARB spec — or "none"
+  how:    ARB spec sheet + kinematics
+  why:    Rear share of lateral load transfer.
+
+roll_center_height_front:
+  label:  "Front roll-centre height"
+  value:  0.03
+  unit:   m
+  symbol: h_rc_f
+  status: PLACEHOLDER — typical FSAE value
+  what:   Height of the front roll centre above ground at static ride height.
+  need:   Front roll-centre height from the kinematics model
+  how:    Kinematics model at static ride height (or the construction from the wishbone instant centres)
+  why: >
+    Lateral force below this height is reacted through the links instantly
+    (geometric transfer); above it, through the springs (elastic, lagging).
+    The split changes how fast the inner wheel unloads on turn-in.
+
+roll_center_height_rear:
+  label:  "Rear roll-centre height"
+  value:  0.05
+  unit:   m
+  symbol: h_rc_r
+  status: PLACEHOLDER — typical FSAE value
+  what:   Same as roll_center_height_front, rear.
+  need:   Rear roll-centre height
+  how:    Kinematics model
+  why:    Rear geometric/elastic load-transfer split.
+
+anti_dive:
+  label:  "Front anti-dive"
+  value:  0.2
+  unit:   "-"
+  display_unit: fraction (0-1)
+  symbol: AD
+  status: PLACEHOLDER — typical FSAE value
+  what:   Fraction of the front longitudinal load change reacted through the links instead of the springs under braking.
+  need:   Anti-dive % from the side-view geometry
+  how:    Kinematics model (side-view instant centre)
+  why:    How much the nose dives under braking, which moves aero and camber.
+
+anti_squat:
+  label:  "Rear anti-squat"
+  value:  0.2
+  unit:   "-"
+  display_unit: fraction (0-1)
+  symbol: AS
+  status: PLACEHOLDER — typical FSAE value
+  what:   Fraction of the rear longitudinal load change reacted through the links under drive.
+  need:   Anti-squat % from the side-view geometry
+  how:    Kinematics model
+  why:    Rear squat on corner exit changes rear camber and the aero platform.
+
+travel_jounce_front:
+  label:  "Front jounce travel (from static)"
+  value:  30.0
+  unit:   mm
+  symbol: s_max_f
+  status: PLACEHOLDER — CAD / physical stop
+  what:   Compression available at the front wheel before the hard stop, measured from static ride height.
+  need:   Front jounce travel
+  how:    CAD, or push the car down onto the stops and measure
+  why:    The hard limit the bump stop sits inside.
+
+travel_jounce_rear:
+  label:  "Rear jounce travel (from static)"
+  value:  30.0
+  unit:   mm
+  symbol: s_max_r
+  status: PLACEHOLDER — CAD / physical stop
+  what:   Same as travel_jounce_front, rear.
+  need:   Rear jounce travel
+  how:    CAD
+  why:    Rear hard stop.
+
+travel_rebound_front:
+  label:  "Front rebound travel (from static)"
+  value:  30.0
+  unit:   mm
+  symbol: s_min_f
+  status: PLACEHOLDER — CAD / physical stop
+  what:   Extension available at the front wheel before the droop stop.
+  need:   Front rebound travel
+  how:    CAD, or lift the car and measure droop
+  why:    Where an unloading inner wheel runs out of droop and lifts.
+
+travel_rebound_rear:
+  label:  "Rear rebound travel (from static)"
+  value:  30.0
+  unit:   mm
+  symbol: s_min_r
+  status: PLACEHOLDER — CAD / physical stop
+  what:   Same as travel_rebound_front, rear.
+  need:   Rear rebound travel
+  how:    CAD
+  why:    Rear droop limit.
+
+bump_stop_gap_front:
+  label:  "Front bump-stop gap (from static)"
+  value:  20.0
+  unit:   mm
+  symbol: g_bs_f
+  status: PLACEHOLDER — setup sheet
+  what:   Wheel travel from static before the front bump stop starts carrying load.
+  need:   Bump-stop gap at the wheel
+  how:    Setup sheet (shock-shaft gap x motion ratio)
+  why:    A bump stop engaging mid-corner is a sudden stiffness step — a load-transfer jump the controller sees as grip change.
+
+bump_stop_gap_rear:
+  label:  "Rear bump-stop gap (from static)"
+  value:  20.0
+  unit:   mm
+  symbol: g_bs_r
+  status: PLACEHOLDER — setup sheet
+  what:   Same as bump_stop_gap_front, rear.
+  need:   Rear bump-stop gap
+  how:    Setup sheet
+  why:    Rear stiffness step.
+
+bump_stop_rate:
+  label:  "Bump-stop rate (at the wheel)"
+  value:  200.0
+  unit:   N/mm
+  symbol: k_bs
+  status: PLACEHOLDER — bump-stop spec
+  what:   Linearised stiffness of the bump stop once engaged, referred to the wheel.
+  need:   Bump-stop force-deflection curve
+  how:    Bump-stop spec sheet / press test
+  why:    How hard the stiffness step is.
+
+camber_static_front:
+  label:  "Front static camber"
+  value:  -1.5
+  unit:   deg
+  symbol: gamma0_f
+  status: PLACEHOLDER — setup sheet
+  what:   Front wheel camber at static ride height, ISO sign (negative = top of the tire leaning in).
+  need:   Front camber setting
+  how:    Camber gauge, setup sheet
+  why:    Camber thrust adds lateral force; the tire fit was made at ~0 deg so this is a correction on top.
+
+camber_static_rear:
+  label:  "Rear static camber"
+  value:  -1.0
+  unit:   deg
+  symbol: gamma0_r
+  status: PLACEHOLDER — setup sheet
+  what:   Same as camber_static_front, rear.
+  need:   Rear camber setting
+  how:    Camber gauge
+  why:    Rear camber thrust.
+
+toe_static_front:
+  label:  "Front static toe (per wheel)"
+  value:  0.0
+  unit:   deg
+  symbol: toe_f
+  status: PLACEHOLDER — setup sheet
+  what:   Front toe per wheel, positive = toe-in.
+  need:   Front toe setting
+  how:    Toe plates / strings
+  why:    A standing slip angle on each front wheel.
+
+toe_static_rear:
+  label:  "Rear static toe (per wheel)"
+  value:  0.0
+  unit:   deg
+  symbol: toe_r
+  status: PLACEHOLDER — setup sheet
+  what:   Rear toe per wheel, positive = toe-in.
+  need:   Rear toe setting
+  how:    Toe plates
+  why:    Rear standing slip angle.
+
+camber_gain_bump_front:
+  label:  "Front camber gain in bump"
+  value:  -0.03
+  unit:   deg/mm
+  symbol: dgamma_ds_f
+  status: PLACEHOLDER — kinematics model
+  what:   Camber change per mm of front jounce (compression).
+  need:   Front camber-vs-travel curve slope
+  how:    Kinematics model
+  why:    The outer wheel gains camber as it compresses; the tire's thrust changes with it.
+
+camber_gain_bump_rear:
+  label:  "Rear camber gain in bump"
+  value:  -0.03
+  unit:   deg/mm
+  symbol: dgamma_ds_r
+  status: PLACEHOLDER — kinematics model
+  what:   Same as camber_gain_bump_front, rear.
+  need:   Rear camber-vs-travel slope
+  how:    Kinematics model
+  why:    Rear camber in bump.
+
+camber_gain_roll_front:
+  label:  "Front camber gain in roll"
+  value:  0.7
+  unit:   deg/deg
+  symbol: dgamma_dphi_f
+  status: PLACEHOLDER — typical double wishbone
+  what: >
+    Wheel camber relative to the ground per degree of body roll (positive
+    = the wheel leans with the body). 1.0 = the wheel rolls fully with the
+    chassis (no camber recovery), 0 = full recovery.
+  need:   Front camber-vs-roll slope
+  how:    Kinematics model
+  why:    Body roll is the main source of camber loss in a corner.
+
+camber_gain_roll_rear:
+  label:  "Rear camber gain in roll"
+  value:  0.7
+  unit:   deg/deg
+  symbol: dgamma_dphi_r
+  status: PLACEHOLDER — typical double wishbone
+  what:   Same as camber_gain_roll_front, rear.
+  need:   Rear camber-vs-roll slope
+  how:    Kinematics model
+  why:    Rear camber loss in roll.
+
+bump_steer_front:
+  label:  "Front bump steer"
+  value:  0.0
+  unit:   deg/mm
+  symbol: dtoe_ds_f
+  status: PLACEHOLDER — kinematics model / bump-steer gauge
+  what:   Front toe change per mm of jounce (positive = toe-in in bump).
+  need:   Front bump-steer curve slope
+  how:    Kinematics model, or bump-steer gauge
+  why:    A steer input the driver did not make, every time the suspension moves.
+
+bump_steer_rear:
+  label:  "Rear bump steer"
+  value:  0.0
+  unit:   deg/mm
+  symbol: dtoe_ds_r
+  status: PLACEHOLDER — kinematics model
+  what:   Same as bump_steer_front, rear.
+  need:   Rear bump-steer slope
+  how:    Kinematics model
+  why:    Rear roll steer.
+
+unsprung_cg_height:
+  label:  "Unsprung CG height"
+  derived: drivetrain.wheel_radius
+  unit:   m
+  symbol: h_u
+  status: DERIVED — assumed at wheel-centre height
+  what:   Height of each unsprung mass's CG above ground.
+  need:   Unsprung CG height (CAD)
+  how:    CAD mass properties of the upright assembly
+  why:    Separates the sprung-mass CG height (what rolls) from the whole-vehicle h_cg.

@@ -10,16 +10,22 @@
 
 WHERE THE NUMBERS ARE
 ─────────────────────
-    model/physical/environment/params.yaml   g, air density
-    model/physical/mass/params.yaml          car + driver mass
-    model/physical/geometry/params.yaml      wheelbase, track, CG, yaw inertia
+    model/physical/environment/params.yaml   g, air density, ambient, wind, grade
+    model/physical/mass/params.yaml          car + driver mass, sprung/unsprung
+    model/physical/geometry/params.yaml      wheelbase, track, CG, inertias
     model/physical/drivetrain/params.yaml    wheels, gearing, AMK motors, limits
-    model/physical/aero/params.yaml          C_L, C_D, frontal area, balance
-    model/physical/steering/params.yaml      Ackermann fraction
-    model/physical/loads/params.yaml         lateral load-transfer split
+    model/physical/aero/params.yaml          C_L, C_D, frontal area, balance, CoP
+    model/physical/steering/params.yaml      Ackermann; rack + knuckle DOFs
+    model/physical/loads/params.yaml         spring rates, planar transfer split
+    model/physical/suspension/params.yaml    jounce DOFs, ARBs, kinematics (full plant)
+    model/physical/dampers/params.yaml       damper curves + Bouc-Wen (full plant)
+    model/physical/motors/params.yaml        rotor, shaft, inverter path (full plant)
+    model/physical/battery/params.yaml       3-zone cell model (full plant)
+    model/physical/battery_thermal/params.yaml   core/surface/coolant (full plant)
+    model/physical/brakes/params.yaml        hydraulics, friction torque (full plant)
     model/physical/numerical/params.yaml     solver guards
-    model/physical/tires/params.yaml         Magic Formula coefficients
-    model/sensors/<sensor>/params.yaml       one file per sensor
+    model/physical/tires/params.yaml         Magic Formula + carcass/transients
+    model/sensors/<sensor>/params.yaml       one file per sensor (incl. gps/)
     sil/params.yaml                          software-in-the-loop timing
 
 READING A VALUE
@@ -95,10 +101,15 @@ MPH = 0.44704         # m/s per mph               (speed)
 HP = 745.699872       # W per horsepower          (power)
 DEG = math.pi / 180.0  # rad per degree            (angles)
 RPM = math.pi / 30.0  # rad/s per rev-per-minute  (rotational speed)
+BAR = 1.0e5           # Pa per bar                (brake line pressure: the
+                      # sensors report bar and the loader keeps bar; the
+                      # brake-torque formula needs Pa and multiplies by this)
+PSI = 6894.757        # Pa per psi
+AH = 3600.0           # C per amp-hour            (battery capacity)
 
 UNITS = {
     # mass
-    "kg": 1.0, "lb": LB,
+    "kg": 1.0, "lb": LB, "g": 1e-3,
     # length
     "m": 1.0, "in": INCH, "ft": FT, "mm": 1e-3,
     # angle / rotation
@@ -108,12 +119,23 @@ UNITS = {
     "m/s": 1.0, "mph": MPH, "km/h": 1.0 / 3.6,
     # force / torque / power / pressure
     "N": 1.0, "N*m": 1.0, "lbft": LBFT,
-    "N*m/rad": 1.0, "N*m/A": 1.0, "A": 1.0,"N*m/(rad/s)": 1.0,
+    "N*m/rad": 1.0, "N*m/deg": 1.0 / DEG, "N*m/A": 1.0, "A": 1.0,
+    "N*m/(rad/s)": 1.0, "N*m*s/rad": 1.0,
     "W": 1.0, "hp": HP,
     "bar": 1.0, "V": 1.0,
+    # stiffness / damping (springs, tires, racks)
+    "N/m": 1.0, "N/mm": 1e3, "N*s/m": 1.0, "N/deg": 1.0 / DEG,
+    # electrical / thermal (battery)
+    "Ah": AH, "ohm": 1.0, "mohm": 1e-3, "F": 1.0, "J/K": 1.0, "K/W": 1.0,
+    "W/K": 1.0, "1/K": 1.0, "degC": 1.0, "A/s": 1.0, "V/SOC": 1.0,
+    # time
+    "ms": 1e-3,
     # composite / dimensionless
-    "m/s^2": 1.0, "kg/m^3": 1.0, "kg*m^2": 1.0, "m^2": 1.0,
+    "m/s^2": 1.0, "kg/m^3": 1.0, "kg*m^2": 1.0, "m^2": 1.0, "mm^2": 1e-6,
+    "kPa": 1e3, "psi": PSI,
     "Hz": 1.0, "s": 1.0, "%": 1.0, "1/rad": 1.0, "1/slip": 1.0,
+    "mm/rev": 1e-3, "deg/mm": DEG / 1e-3, "deg/deg": 1.0, "1/mm": 1e3,
+    "m/s/sqrt(s)": 1.0, "m/s^2/sqrt(s)": 1.0,
     "-": 1.0,
     # Per-LSB resolutions. These are NOT converted: a sensor's quantization is
     # applied in the unit that sensor reports in (the SAS reads handwheel

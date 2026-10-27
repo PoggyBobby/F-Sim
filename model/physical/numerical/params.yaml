@@ -34,3 +34,27 @@ w_eps:
     Flooring the divisor caps it at P_peak/w_eps instead, which the per-wheel
     peak-torque limit then covers. 5 rad/s is ~1.1 m/s of ground speed, below
     the regen cutoff, so it never binds while the car is actually driving.
+
+# ── full plant (vehicle17.py) ────────────────────────────────────────────────
+
+v_smooth:
+  label:  "Friction sign smoothing speed"
+  value:  0.05
+  unit:   m/s
+  symbol: v_sm
+  status: NUMERICAL GUARD
+  what:   Velocity scale of the tanh() that replaces sign() in Coulomb friction (rack friction, rolling resistance).
+  need:   "-"
+  how:    "-"
+  why:    A hard sign() flips every sub-step at rest and stalls RK4.
+
+w_smooth:
+  label:  "Brake sign smoothing speed"
+  value:  0.5
+  unit:   rad/s
+  symbol: w_sm
+  status: NUMERICAL GUARD
+  what:   Wheel-speed scale of the tanh() that gives brake and bearing torque their sign.
+  need:   "-"
+  how:    "-"
+  why:    Lets a braked wheel come to rest instead of chattering about zero.

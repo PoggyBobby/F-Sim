@@ -1,0 +1,130 @@
+namespace: battery_thermal
+order: 47
+title: "BATTERY THERMAL — 3 zones core/surface + coolant (full plant)"
+
+about: >
+  Thermal side of the 3-zone pack: per zone a core and a surface
+  temperature, plus one coolant temperature — 7 of the 80 states.
+
+      C_core dT_core/dt = Q_zone - (T_core - T_surf) / R_cs
+      C_surf dT_surf/dt = (T_core - T_surf) / R_cs - (T_surf - T_cool) / R_sc
+      C_cool dT_cool/dt = sum_zones (T_surf - T_cool) / R_sc - UA (T_cool - T_amb)
+
+  Q_zone is the zone's I^2 R0 + polarisation heating from battery/params.yaml.
+  The middle zone gets hot_spot_factor x R_sc so a hot spot emerges. The BMS
+  derate (current limit vs hottest core temperature) is here because it is
+  what this block exists to produce.
+
+  Capacities and resistances are PER ZONE (all the zone's cells together).
+  Fill from the cell datasheet (mass, specific heat, thermal resistance) and
+  the cooling-plate design.
+
+c_core:
+  label:  "Zone core heat capacity"
+  value:  9600.0
+  unit:   J/K
+  symbol: C_core
+  status: PLACEHOLDER — 96 cells x 0.1 kg x 1000 J/kg/K
+  what:   Heat capacity of one zone's cell cores (cells per zone x cell mass x specific heat).
+  need:   Cell mass and specific heat
+  how:    Cell datasheet; ~1000 J/kg/K for Li-ion
+  why:    How fast the cells heat under load.
+
+c_surface:
+  label:  "Zone surface heat capacity"
+  value:  2000.0
+  unit:   J/K
+  symbol: C_surf
+  status: PLACEHOLDER — casing + busbars estimate
+  what:   Heat capacity of one zone's casings, tabs and busbars.
+  need:   Mass of the zone hardware
+  how:    CAD / weigh the segment hardware
+  why:    Lag between core and coolant temperature.
+
+r_core_surface:
+  label:  "Core-to-surface thermal resistance (per zone)"
+  value:  0.02
+  unit:   K/W
+  symbol: R_cs
+  status: PLACEHOLDER — ~2 K/W per cell / 96 cells
+  what:   Thermal resistance from the cell cores to their surfaces, for the whole zone.
+  need:   Cell thermal resistance (datasheet) / cells per zone
+  how:    Datasheet, or a heat-up test with core and surface thermocouples
+  why:    Core temperature runs above the surface the BMS measures.
+
+r_surface_coolant:
+  label:  "Surface-to-coolant thermal resistance (per zone)"
+  value:  0.05
+  unit:   K/W
+  symbol: R_sc
+  status: PLACEHOLDER — cooling-plate design
+  what:   Thermal resistance from the zone's surfaces into the coolant.
+  need:   Cooling plate contact area and conductance
+  how:    Cooling design calc, or a test with inlet/outlet thermocouples
+  why:    The bottleneck that decides the steady-state cell temperature.
+
+hot_spot_factor:
+  label:  "Middle-zone cooling penalty"
+  value:  1.3
+  unit:   "-"
+  symbol: f_hot
+  status: PLACEHOLDER — makes a hot spot appear
+  what:   Multiplier on R_sc for the middle zone (worse cooling in the middle of the pack).
+  need:   Measured zone temperature spread
+  how:    Thermocouples per segment on a run
+  why:    Without it the three zones are identical and the 3-zone model is pointless.
+
+c_coolant:
+  label:  "Coolant heat capacity"
+  value:  8372.0
+  unit:   J/K
+  symbol: C_cool
+  status: PLACEHOLDER — 2 L water
+  what:   Heat capacity of the coolant loop (volume x density x specific heat).
+  need:   Coolant volume
+  how:    Fill volume x 4186 J/kg/K
+  why:    Coolant warms over a run.
+
+ua_radiator:
+  label:  "Radiator heat rejection"
+  value:  50.0
+  unit:   W/K
+  symbol: UA
+  status: PLACEHOLDER — radiator spec at driving airflow
+  what:   Heat rejected to ambient per kelvin of coolant-ambient difference.
+  need:   Radiator spec at the car's airflow
+  how:    Radiator datasheet, or measure coolant in/out vs speed
+  why:    Steady-state coolant temperature.
+
+derate_start:
+  label:  "BMS derate start temperature"
+  value:  50.0
+  unit:   degC
+  symbol: T_d0
+  status: PLACEHOLDER — BMS config
+  what:   Hottest-zone core temperature at which the BMS begins reducing the discharge current limit.
+  need:   BMS configuration
+  how:    BMS config file
+  why:    Where derating starts to cut power.
+
+derate_end:
+  label:  "BMS derate end temperature"
+  value:  60.0
+  unit:   degC
+  symbol: T_d1
+  status: PLACEHOLDER — BMS config
+  what:   Temperature at which the discharge limit reaches zero (linear ramp from derate_start).
+  need:   BMS configuration
+  how:    BMS config file
+  why:    Full cut.
+
+t_initial:
+  label:  "Initial cell/coolant temperature"
+  derived: environment.t_ambient
+  unit:   degC
+  symbol: T_0
+  status: DERIVED — starts at ambient
+  what:   Every core, surface and the coolant start a run at this temperature.
+  need:   "-"
+  how:    = ambient; set a hotter start for an end-of-endurance scenario
+  why:    Where the derate starts counting from.
